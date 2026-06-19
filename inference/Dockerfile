@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    TTS_DEVICE=cpu
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsndfile1 sox \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+      torch==2.7.1 torchaudio==2.7.1 \
+      --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir \
+      qwen-tts==0.1.1 fastapi==0.115.12 "uvicorn[standard]==0.34.3"
+
+WORKDIR /service
+COPY app.py .
+
+EXPOSE 8001
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]

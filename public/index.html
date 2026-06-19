@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Studio de synthèse vocale piloté par une description en langage naturel."
+    />
+    <title>Voice Forge — Studio TTS</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Voice Forge — accueil">
+        <span class="brand-mark" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+        </span>
+        <span>VOICE FORGE</span>
+      </a>
+      <div class="server-status" id="serverStatus">
+        <span class="status-dot"></span>
+        <span>Connexion…</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">STUDIO LOCAL · 100 % OPEN SOURCE</p>
+        <h1>Donnez une voix à<br /><em>n'importe quel univers.</em></h1>
+        <p class="hero-copy">
+          Écrivez le texte, décrivez le personnage — le studio s'occupe de l'interprétation.
+        </p>
+      </section>
+
+      <nav class="mode-tabs" aria-label="Mode de génération">
+        <button type="button" class="mode-tab active" data-mode="voice" aria-selected="true">
+          <span>01</span> Voix unique
+        </button>
+        <button type="button" class="mode-tab" data-mode="dialogue" aria-selected="false">
+          <span>02</span> Dialogue JSON
+        </button>
+      </nav>
+
+      <section class="studio-shell" id="voiceStudio" aria-label="Générateur vocal">
+        <form id="speechForm" class="studio-form">
+          <div class="field-heading">
+            <label for="speechText"><span>01</span> Le texte à interpréter</label>
+            <output id="characterCount" for="speechText">0 / 4096</output>
+          </div>
+          <textarea
+            id="speechText"
+            name="text"
+            rows="6"
+            maxlength="4096"
+            required
+            placeholder="Dans les profondeurs de la montagne, quelque chose vient de s'éveiller…"
+          ></textarea>
+
+          <div class="field-heading voice-heading">
+            <label for="voiceDescription"><span>02</span> La direction de voix</label>
+            <span class="hint">Décrivez librement le ton, le rythme et le personnage</span>
+          </div>
+
+          <div class="presets" id="presets" aria-label="Styles rapides"></div>
+
+          <textarea
+            id="voiceDescription"
+            name="voiceDescription"
+            class="description-input"
+            rows="3"
+            maxlength="1000"
+            placeholder="Ex. Une voix de démon très grave, ancienne et menaçante, avec une sensation d'écho…"
+          ></textarea>
+
+          <details class="advanced">
+            <summary>Réglages avancés <span aria-hidden="true">+</span></summary>
+            <div class="advanced-content">
+              <label for="speechLanguage">Langue du texte</label>
+              <select id="speechLanguage" name="language"></select>
+              <p>Qwen3-TTS crée directement le timbre depuis votre description.</p>
+            </div>
+          </details>
+
+          <div class="form-footer">
+            <p><span class="spark">✦</span> La sortie utilise une voix générée par IA.</p>
+            <button type="submit" id="generateButton">
+              <span class="button-label">Générer la voix</span>
+              <span class="button-arrow" aria-hidden="true">↗</span>
+            </button>
+          </div>
+        </form>
+
+        <aside class="result-panel" id="resultPanel">
+          <div class="result-idle" id="resultIdle">
+            <div class="orb" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <p>Votre création apparaîtra ici</p>
+            <span>WAV · moteur local · aucune donnée envoyée</span>
+          </div>
+
+          <div class="result-ready" id="resultReady" hidden>
+            <p class="result-kicker">CRÉATION TERMINÉE</p>
+            <h2>Votre voix est prête.</h2>
+            <div class="waveform" aria-hidden="true" id="waveform"></div>
+            <audio id="audioPlayer" controls></audio>
+            <div class="result-actions">
+              <button type="button" class="secondary-button" id="downloadButton">
+                Télécharger le WAV
+              </button>
+              <button type="button" class="icon-button" id="resetButton" title="Réinitialiser">
+                ↻
+              </button>
+            </div>
+            <p class="generation-meta" id="generationMeta"></p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="studio-shell dialogue-studio" id="dialogueStudio" aria-label="Générateur de dialogue" hidden>
+        <form id="dialogueForm" class="studio-form dialogue-form">
+          <div class="field-heading">
+            <label for="dialogueFile"><span>01</span> Charger le dialogue</label>
+            <span class="hint">JSON · 50 répliques maximum</span>
+          </div>
+
+          <label class="file-drop" id="fileDrop" for="dialogueFile">
+            <input id="dialogueFile" type="file" accept=".json,application/json" />
+            <span class="file-icon" aria-hidden="true">⇧</span>
+            <strong id="fileDropTitle">Déposer ou choisir un fichier JSON</strong>
+            <small>Format attendu : { "elements": ["Bonjour", "Salut"] }</small>
+          </label>
+
+          <div class="dialogue-voices">
+            <div class="voice-choice voice-a">
+              <span class="speaker-badge">A · INDEX PAIR</span>
+              <label for="dialogueVoiceA">Première voix</label>
+              <select id="dialogueVoiceA" required></select>
+            </div>
+            <div class="voice-choice voice-b">
+              <span class="speaker-badge">B · INDEX IMPAIR</span>
+              <label for="dialogueVoiceB">Deuxième voix</label>
+              <select id="dialogueVoiceB" required></select>
+            </div>
+          </div>
+
+          <div class="dialogue-options">
+            <label for="dialogueLanguage">Langue</label>
+            <select id="dialogueLanguage"></select>
+            <label for="dialoguePause">Pause entre les répliques</label>
+            <select id="dialoguePause">
+              <option value="150">Courte · 150 ms</option>
+              <option value="350" selected>Naturelle · 350 ms</option>
+              <option value="650">Longue · 650 ms</option>
+              <option value="1000">Théâtrale · 1 s</option>
+            </select>
+          </div>
+
+          <div class="dialogue-preview-heading">
+            <div class="field-heading">
+              <label><span>02</span> Aperçu du dialogue</label>
+              <output id="dialogueCount">Aucun fichier chargé</output>
+            </div>
+          </div>
+          <div class="dialogue-preview empty" id="dialoguePreview">
+            <p>Les répliques apparaîtront ici, alternées entre A et B.</p>
+          </div>
+
+          <div class="form-footer">
+            <p><span class="spark">✦</span> Les index pairs utilisent A, les impairs utilisent B.</p>
+            <button type="submit" id="generateDialogueButton" disabled>
+              <span class="button-label dialogue-button-label">Générer le dialogue</span>
+              <span class="button-arrow" aria-hidden="true">↗</span>
+            </button>
+          </div>
+        </form>
+
+        <aside class="result-panel">
+          <div class="result-idle" id="dialogueResultIdle">
+            <div class="dialogue-orb" aria-hidden="true">
+              <span>A</span><i></i><span>B</span>
+            </div>
+            <p>Le dialogue assemblé apparaîtra ici</p>
+            <span>UN SEUL WAV · PRÊT À ENREGISTRER</span>
+          </div>
+
+          <div class="result-ready" id="dialogueResultReady" hidden>
+            <p class="result-kicker">DIALOGUE TERMINÉ</p>
+            <h2>La scène est prête.</h2>
+            <div class="waveform" aria-hidden="true" id="dialogueWaveform"></div>
+            <audio id="dialogueAudioPlayer" controls></audio>
+            <div class="result-actions">
+              <button type="button" class="secondary-button" id="saveDialogueButton">
+                Enregistrer le dialogue
+              </button>
+              <button type="button" class="icon-button" id="resetDialogueButton" title="Réinitialiser">
+                ↻
+              </button>
+            </div>
+            <p class="generation-meta" id="dialogueGenerationMeta"></p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="api-strip">
+        <div>
+          <p class="eyebrow">UNE API LOCALE, DEUX MODES</p>
+          <h2>Une voix ou toute une scène.</h2>
+        </div>
+        <pre><code><span>const</span> response = <span>await</span> fetch(<b>"/api/speech"</b>, {
+  method: <b>"POST"</b>, headers: { <b>"Content-Type"</b>: <b>"application/json"</b> },
+  body: JSON.stringify({ text, voiceDescription })
+});
+audio.src = URL.createObjectURL(<span>await</span> response.blob());</code></pre>
+      </section>
+    </main>
+
+    <footer>
+      <span>VOICE FORGE / 2026</span>
+      <span id="modelName">MOTEUR TTS</span>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

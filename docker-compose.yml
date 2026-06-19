@@ -1,0 +1,34 @@
+services:
+  tts-engine:
+    build:
+      context: ./inference
+      dockerfile: Dockerfile
+    environment:
+      TTS_DEVICE: cpu
+      HF_HOME: /models
+    volumes:
+      - qwen-models:/models
+    ports:
+      - "127.0.0.1:8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 60
+      start_period: 10m
+    restart: unless-stopped
+
+  voice-forge:
+    build: .
+    environment:
+      QWEN_TTS_URL: http://tts-engine:8001
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      tts-engine:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  qwen-models:

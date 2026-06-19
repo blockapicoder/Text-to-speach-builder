@@ -1,0 +1,14 @@
+services:
+  tts-engine:
+    build:
+      context: ./inference
+      dockerfile: Dockerfile.gpu
+    environment:
+      TTS_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
