@@ -66,6 +66,14 @@ CUSTOM_SPEAKERS = {
     "Ono_Anna",
     "Sohee",
 }
+VOICE_REFERENCE_TEXTS = {
+    "French": "Je parle clairement, avec une voix régulière, pour raconter cette histoire.",
+    "English": "I speak clearly, with a steady voice, to tell this story.",
+    "Spanish": "Hablo claramente, con una voz estable, para contar esta historia.",
+    "German": "Ich spreche klar und mit ruhiger Stimme, um diese Geschichte zu erzählen.",
+    "Italian": "Parlo chiaramente, con una voce regolare, per raccontare questa storia.",
+    "Portuguese": "Falo claramente, com uma voz estável, para contar esta história.",
+}
 
 
 class SpeechRequest(BaseModel):
@@ -317,7 +325,8 @@ def voice_direction(description: str) -> str:
 
     directions.append(description.strip())
     directions.append(
-        "Speak only the supplied text. Do not add, remove, translate, or rephrase words."
+        "Begin immediately with the first word. Speak only the supplied text. "
+        "Do not sigh, breathe aloud, hum, add, remove, translate, or rephrase words."
     )
     return " ".join(directions)
 
@@ -562,32 +571,36 @@ def split_text(text: str, limit: int = MAX_CHUNK_CHARACTERS) -> list[str]:
     sentences = [part for part in re.split(r"(?<=[.!?…])\s+", text) if part]
 
     for sentence in sentences:
-        current = ""
-        # Dans une phrase trop longue, on préfère ensuite les limites de
-        # proposition, puis les espaces. Un mot n'est jamais coupé.
-        clauses = [part for part in re.split(r"(?<=[,:;—–])\s+", sentence) if part]
-        for clause in clauses:
-            piece = ""
-            pieces = []
-            for word in clause.split():
-                candidate = f"{piece} {word}".strip()
-                if piece and len(candidate) > limit:
-                    pieces.append(piece)
-                    piece = word
-                else:
-                    piece = candidate
-            if piece:
-                pieces.append(piece)
+        # Une petite tolérance évite de créer un fragment orphelin pour une
+        # phrase de 95 caractères avec une cible de 90.
+        hard_limit = max(limit, round(limit * 4 / 3))
+        remaining = sentence
+        while len(remaining) > hard_limit:
+            part_count = max(2, (len(remaining) + limit - 1) // limit)
+            ideal = len(remaining) / part_count
 
-            for piece in pieces:
-                candidate = f"{current} {piece}".strip()
-                if current and len(candidate) > limit:
-                    chunks.append(current)
-                    current = piece
-                else:
-                    current = candidate
-        if current:
-            chunks.append(current)
+            punctuation_boundaries = [
+                match.start() + 1
+                for match in re.finditer(r"[,:;—–](?=\s)", remaining)
+                if limit * 0.45 <= match.start() + 1 <= hard_limit
+            ]
+            word_boundaries = [
+                match.start()
+                for match in re.finditer(r"\s+", remaining)
+                if limit * 0.45 <= match.start() <= hard_limit
+            ]
+            candidates = punctuation_boundaries or word_boundaries
+            if not candidates:
+                # Un mot exceptionnellement long reste entier.
+                next_space = remaining.find(" ", hard_limit)
+                split_at = len(remaining) if next_space < 0 else next_space
+            else:
+                split_at = min(candidates, key=lambda position: abs(position - ideal))
+
+            chunks.append(remaining[:split_at].strip())
+            remaining = remaining[split_at:].strip()
+        if remaining:
+            chunks.append(remaining)
     return chunks
 
 
@@ -713,9 +726,14 @@ def concatenate_speech_chunks(
 
 def generate_chunk_waveform(payload: SpeechRequest, text: str, voice_clone_prompt=None):
     language = payload.language if payload.language in LANGUAGES else "Auto"
-    # Une marge de 1,5 token par caractère empêche les voix lentes d'être
-    # coupées par la limite. Le critère thermique reste prioritaire.
-    max_new_tokens = max(64, min(320, int(len(text) * 1.5)))
+    # Une marge généreuse empêche les voix lentes d'être coupées avant
+    # leurs derniers mots. Le modèle s'arrête toujours naturellement sur EOS
+    # et le critère thermique reste prioritaire.
+    max_new_tokens = max(96, min(512, int(len(text) * 2.2)))
+    print(
+        f"Segment vocal : {len(text)} caractères, budget maximal {max_new_tokens} tokens.",
+        flush=True,
+    )
     seed = apply_stable_seed(payload)
     print(f"Voix stable : seed={seed}, paramètres Qwen natifs.", flush=True)
 
@@ -788,10 +806,10 @@ def synthesize(payload: SpeechRequest) -> bytes:
             1,
             len(chunks),
         )
-        reference_waveform, reference_rate = generate_chunk_waveform(payload, chunks[0])
-        segments.append(
-            encode_waveform(reference_waveform, reference_rate, payload.voice_description)
+        reference_text = VOICE_REFERENCE_TEXTS.get(
+            payload.language, VOICE_REFERENCE_TEXTS["French"]
         )
+        reference_waveform, reference_rate = generate_chunk_waveform(payload, reference_text)
         cool_down_between_segments(payload.job_id)
         wait_for_safe_temperature(payload.job_id)
         load_model("base", payload.job_id)
@@ -799,8 +817,8 @@ def synthesize(payload: SpeechRequest) -> bytes:
             payload.job_id,
             "voice_clone",
             20,
-            "Verrouillage de la voix pour les segments suivants…",
-            1,
+            "Voix verrouillée pour tous les segments du texte…",
+            0,
             len(chunks),
         )
         voice_clone_prompt = engine.model.create_voice_clone_prompt(
@@ -811,7 +829,10 @@ def synthesize(payload: SpeechRequest) -> bytes:
             ref_text=None,
             x_vector_only_mode=True,
         )
-        start_index = 1
+        # La référence technique n'est jamais incluse dans le WAV final.
+        # Chaque mot de l'utilisateur, y compris le premier segment, passe par
+        # le même moteur Base et la même empreinte vocale.
+        start_index = 0
 
     for index in range(start_index, len(chunks)):
         chunk = chunks[index]
