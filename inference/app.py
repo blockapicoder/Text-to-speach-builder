@@ -556,39 +556,38 @@ def status():
 
 def split_text(text: str, limit: int = MAX_CHUNK_CHARACTERS) -> list[str]:
     text = re.sub(r"\s+", " ", text.strip())
-    if len(text) <= limit:
-        return [text]
-
-    # Les raccords après une ponctuation sont bien moins perceptibles qu'une
-    # coupe arbitraire au milieu d'une proposition.
-    sentences = re.split(r"(?<=[.!?…,:;—–])\s+", text)
     chunks = []
-    current = ""
+    # Une ponctuation terminale force toujours un nouveau segment. Ainsi,
+    # l'utilisateur peut maîtriser le découpage en ajoutant simplement un point.
+    sentences = [part for part in re.split(r"(?<=[.!?…])\s+", text) if part]
 
     for sentence in sentences:
-        words = sentence.split()
-        pieces = []
-        piece = ""
-        for word in words:
-            candidate = f"{piece} {word}".strip()
-            if piece and len(candidate) > limit:
+        current = ""
+        # Dans une phrase trop longue, on préfère ensuite les limites de
+        # proposition, puis les espaces. Un mot n'est jamais coupé.
+        clauses = [part for part in re.split(r"(?<=[,:;—–])\s+", sentence) if part]
+        for clause in clauses:
+            piece = ""
+            pieces = []
+            for word in clause.split():
+                candidate = f"{piece} {word}".strip()
+                if piece and len(candidate) > limit:
+                    pieces.append(piece)
+                    piece = word
+                else:
+                    piece = candidate
+            if piece:
                 pieces.append(piece)
-                piece = word
-            else:
-                piece = candidate
-        if piece:
-            pieces.append(piece)
 
-        for piece in pieces:
-            candidate = f"{current} {piece}".strip()
-            if current and len(candidate) > limit:
-                chunks.append(current)
-                current = piece
-            else:
-                current = candidate
-
-    if current:
-        chunks.append(current)
+            for piece in pieces:
+                candidate = f"{current} {piece}".strip()
+                if current and len(candidate) > limit:
+                    chunks.append(current)
+                    current = piece
+                else:
+                    current = candidate
+        if current:
+            chunks.append(current)
     return chunks
 
 
@@ -648,8 +647,15 @@ def concatenate_wavs(segments: list[bytes], pause_ms: int, prefix: str) -> bytes
         return result_path.read_bytes()
 
 
-def concatenate_speech_chunks(segments: list[bytes], crossfade_ms: int = 24) -> bytes:
+def concatenate_speech_chunks(
+    segments: list[bytes],
+    chunk_texts: list[str] | None = None,
+    crossfade_ms: int = 40,
+    sentence_pause_ms: int = 90,
+) -> bytes:
     """Assemble les morceaux d'une même prise sans silence artificiel."""
+    if chunk_texts is not None and len(chunk_texts) != len(segments):
+        raise ValueError("Le nombre de textes et de segments audio doit correspondre.")
     decoded = []
     sample_rate = None
     channels = None
@@ -663,7 +669,22 @@ def concatenate_speech_chunks(segments: list[bytes], crossfade_ms: int = 24) -> 
 
     joined = decoded[0]
     requested_frames = int(sample_rate * crossfade_ms / 1000)
-    for following in decoded[1:]:
+    for index, following in enumerate(decoded[1:], start=1):
+        previous_text = chunk_texts[index - 1].rstrip() if chunk_texts else ""
+        sentence_boundary = bool(re.search(r"[.!?…][\"'»)]*$", previous_text))
+        if sentence_boundary:
+            edge_frames = min(int(sample_rate * 8 / 1000), len(joined) // 4, len(following) // 4)
+            following = following.copy()
+            if edge_frames > 1:
+                edge = np.linspace(0.0, 1.0, edge_frames, dtype=np.float32)[:, None]
+                joined[-edge_frames:] *= edge[::-1]
+                following[:edge_frames] *= edge
+            silence = np.zeros(
+                (int(sample_rate * sentence_pause_ms / 1000), channels), dtype=np.float32
+            )
+            joined = np.concatenate([joined, silence, following], axis=0)
+            continue
+
         fade_frames = min(requested_frames, len(joined) // 4, len(following) // 4)
         if fade_frames <= 1:
             joined = np.concatenate([joined, following], axis=0)
@@ -808,7 +829,7 @@ def synthesize(payload: SpeechRequest) -> bytes:
         if index < len(chunks) - 1:
             cool_down_between_segments(payload.job_id)
     update_progress(payload.job_id, "assembling", 92, "Assemblage et normalisation de l'audio…")
-    return concatenate_speech_chunks(segments)
+    return concatenate_speech_chunks(segments, chunks)
 
 
 def synthesize_dialogue(payload: DialogueRequest) -> bytes:
@@ -843,7 +864,7 @@ def synthesize_dialogue(payload: DialogueRequest) -> bytes:
             completed_chunks += 1
             if completed_chunks < total_chunks:
                 cool_down_between_segments(payload.job_id)
-        segments.append(concatenate_speech_chunks(line_segments))
+        segments.append(concatenate_speech_chunks(line_segments, chunks))
     update_progress(payload.job_id, "assembling", 92, "Assemblage du dialogue…")
     return concatenate_wavs(segments, payload.pause_ms, "dialogue")
 

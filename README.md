@@ -156,7 +156,7 @@ Sources officielles : [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) et [modè
 
 Pour un texte VoiceDesign découpé en plusieurs segments, Voice Forge crée d'abord le premier segment avec VoiceDesign, extrait son empreinte vocale avec **Qwen3-TTS Base 0.6B**, puis réutilise cette même empreinte pour tous les segments suivants. Seule l'empreinte du locuteur est transmise : le texte et les codes audio de référence ne sont pas réinjectés, ce qui évite de répéter un mot au début de chaque segment. Le modèle Base est chargé uniquement lorsque ce verrouillage est nécessaire. Sur GPU NVIDIA, il fonctionne en FP32 natif afin d'éviter les crépitements de l'INT8 et l'instabilité numérique observée en FP16 sur les cartes Turing.
 
-Les morceaux internes d'une même prise sont raccordés par un fondu croisé de 24 ms, sans ajouter de silence. La pause configurée dans l'écran Dialogue ne s'applique qu'entre les répliques.
+Un point, un point d'exclamation, un point d'interrogation ou des points de suspension forcent toujours un nouveau segment. Entre deux phrases, Voice Forge crée une pause naturelle de 90 ms avec des bords adoucis. Lorsqu'une phrase trop longue doit malgré tout être coupée sur un espace, les morceaux sont raccordés par un fondu croisé de 40 ms. La pause configurée dans l'écran Dialogue ne s'applique qu'entre les répliques.
 
 CustomVoice 0.6B et Base 0.6B fonctionnent en FP32 natif sur le GPU. VoiceDesign 1.7B utilise le FP16. Chaque sortie, y compris un texte court constitué d'un seul segment, est normalisée à -1 dB.
 
