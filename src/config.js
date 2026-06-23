@@ -1,5 +1,32 @@
 const LANGUAGES = ["Auto", "French", "English", "Spanish", "German", "Italian", "Portuguese"];
 
+const MODES = [
+  {
+    id: "design",
+    name: "VoiceDesign 1.7B",
+    description: "Création libre de personnages et contrôle naturel de la voix.",
+    model: "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+  },
+  {
+    id: "custom",
+    name: "CustomVoice 0.6B",
+    description: "Mode léger avec neuf timbres officiels fixes.",
+    model: "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+  },
+];
+
+const CUSTOM_SPEAKERS = [
+  { id: "Vivian", name: "Vivian", icon: "◇", description: "Jeune voix féminine lumineuse et légèrement vive.", nativeLanguage: "Chinese" },
+  { id: "Serena", name: "Serena", icon: "♡", description: "Jeune voix féminine chaleureuse et douce.", nativeLanguage: "Chinese" },
+  { id: "Uncle_Fu", name: "Uncle Fu", icon: "◆", description: "Voix masculine mûre, basse et moelleuse.", nativeLanguage: "Chinese" },
+  { id: "Dylan", name: "Dylan", icon: "○", description: "Jeune voix masculine claire et naturelle.", nativeLanguage: "Chinese" },
+  { id: "Eric", name: "Eric", icon: "△", description: "Voix masculine vive, brillante et légèrement rauque.", nativeLanguage: "Chinese" },
+  { id: "Ryan", name: "Ryan", icon: "▰", description: "Voix masculine dynamique avec un rythme marqué.", nativeLanguage: "English" },
+  { id: "Aiden", name: "Aiden", icon: "☀", description: "Voix masculine claire, ensoleillée et équilibrée.", nativeLanguage: "English" },
+  { id: "Ono_Anna", name: "Ono Anna", icon: "✿", description: "Voix féminine joueuse, légère et agile.", nativeLanguage: "Japanese" },
+  { id: "Sohee", name: "Sohee", icon: "◈", description: "Voix féminine chaleureuse et riche en émotion.", nativeLanguage: "Korean" },
+];
+
 const PRESETS = [
   {
     id: "demon",
@@ -113,13 +140,19 @@ function integerFromEnv(value, fallback) {
 }
 
 export function getConfig(env = process.env) {
+  const requestedMode = typeof env.TTS_DEFAULT_MODE === "string"
+    ? env.TTS_DEFAULT_MODE.trim().toLowerCase()
+    : "design";
   return {
     port: integerFromEnv(env.PORT, 3000),
     engineUrl: (env.QWEN_TTS_URL?.trim() || "http://127.0.0.1:8001").replace(/\/$/, ""),
     model: "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    defaultMode: MODES.some((mode) => mode.id === requestedMode) ? requestedMode : "design",
     defaultLanguage: "French",
     maxCharacters: integerFromEnv(env.TTS_MAX_CHARACTERS, 4096),
     languages: LANGUAGES,
+    modes: MODES,
     presets: PRESETS,
+    customSpeakers: CUSTOM_SPEAKERS,
   };
 }

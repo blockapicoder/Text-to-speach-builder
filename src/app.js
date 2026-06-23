@@ -1,8 +1,15 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
+import { Agent } from "undici";
 
 import { getConfig } from "./config.js";
 import { validateDialogueRequest, validateSpeechRequest } from "./validation.js";
+
+const engineDispatcher = new Agent({
+  connectTimeout: 10_000,
+  headersTimeout: 0,
+  bodyTimeout: 0,
+});
 
 async function callLocalEngine(config, payload) {
   const engineResponse = await fetch(`${config.engineUrl}/speech`, {
@@ -12,13 +19,18 @@ async function callLocalEngine(config, payload) {
       text: payload.text,
       voice_description: payload.voiceDescription || "Voix naturelle, expressive et claire.",
       language: payload.language,
+      mode: payload.mode,
+      speaker: payload.speaker || null,
+      job_id: payload.jobId || null,
     }),
+    dispatcher: engineDispatcher,
   });
 
   if (!engineResponse.ok) {
     const detail = await engineResponse.json().catch(() => ({}));
     const error = new Error(detail.detail || "Le moteur local a refusé la génération.");
     error.status = engineResponse.status;
+    error.publicMessage = detail.detail;
     throw error;
   }
 
@@ -39,13 +51,19 @@ async function callLocalDialogueEngine(config, payload) {
       voice_b_description: payload.voiceBDescription,
       language: payload.language,
       pause_ms: payload.pauseMs,
+      mode: payload.mode,
+      speaker_a: payload.speakerA || null,
+      speaker_b: payload.speakerB || null,
+      job_id: payload.jobId || null,
     }),
+    dispatcher: engineDispatcher,
   });
 
   if (!engineResponse.ok) {
     const detail = await engineResponse.json().catch(() => ({}));
     const error = new Error(detail.detail || "Le moteur local a refusé le dialogue.");
     error.status = engineResponse.status;
+    error.publicMessage = detail.detail;
     throw error;
   }
 
@@ -60,6 +78,13 @@ export function createApp({
   config = getConfig(),
   synthesize = (payload) => callLocalEngine(config, payload),
   synthesizeDialogue = (payload) => callLocalDialogueEngine(config, payload),
+  getEngineStatus = async () => {
+    const engineResponse = await fetch(`${config.engineUrl}/status`, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!engineResponse.ok) throw new Error("Statut moteur indisponible.");
+    return engineResponse.json();
+  },
 } = {}) {
   const app = express();
 
@@ -72,7 +97,12 @@ export function createApp({
         signal: AbortSignal.timeout(1500),
       });
       const engine = engineResponse.ok ? await engineResponse.json() : null;
-      response.json({ ok: true, configured: Boolean(engine?.ready), model: config.model });
+      response.json({
+        ok: true,
+        configured: Boolean(engine?.ready),
+        model: engine?.model || config.model,
+        mode: engine?.mode || config.defaultMode,
+      });
     } catch {
       response.json({ ok: true, configured: false, model: config.model });
     }
@@ -84,8 +114,23 @@ export function createApp({
       defaultLanguage: config.defaultLanguage,
       maxCharacters: config.maxCharacters,
       languages: config.languages,
+      modes: config.modes,
       presets: config.presets,
+      customSpeakers: config.customSpeakers,
     });
+  });
+
+  app.get("/api/status", async (_request, response) => {
+    try {
+      return response.json(await getEngineStatus());
+    } catch {
+      return response.status(503).json({
+        ready: false,
+        thermal_state: "unavailable",
+        gpu: { available: false },
+        progress: { stage: "offline", percent: 0, message: "Moteur vocal hors ligne" },
+      });
+    }
   });
 
   app.post("/api/speech", async (request, response, next) => {
@@ -143,9 +188,9 @@ export function createApp({
     }
 
     const status = Number.isInteger(error?.status) ? error.status : 503;
-    const publicMessage = status === 503
+    const publicMessage = error?.publicMessage || (status === 503
       ? "Le moteur Qwen3-TTS local n'est pas prêt. Démarrez Docker et réessayez."
-      : "La génération audio locale a échoué.";
+      : "La génération audio locale a échoué.");
 
     return response.status(status >= 400 && status < 600 ? status : 500).json({
       error: publicMessage,

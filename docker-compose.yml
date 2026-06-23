@@ -5,6 +5,13 @@ services:
       dockerfile: Dockerfile
     environment:
       TTS_DEVICE: cpu
+      TTS_DEFAULT_MODE: custom
+      TTS_POWER_PROFILE: balanced
+      TTS_CHUNK_CHARACTERS: 90
+      TTS_GPU_PAUSE_TEMP: 72
+      TTS_GPU_RESUME_TEMP: 65
+      TTS_GPU_ABORT_TEMP: 78
+      TTS_GPU_COOLDOWN_SECONDS: 5
       HF_HOME: /models
     volumes:
       - qwen-models:/models

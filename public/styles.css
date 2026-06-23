@@ -94,6 +94,28 @@ button { color: inherit; }
 .server-status.online .status-dot { background: var(--acid); }
 .server-status.offline .status-dot { background: var(--orange); }
 
+.topbar-status { display: flex; align-items: center; gap: 20px; }
+.gpu-monitor {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  background: rgba(16, 18, 16, .75);
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+.gpu-monitor .gpu-label { color: var(--faint); font-size: .58rem; letter-spacing: .12em; }
+.gpu-monitor strong { color: var(--acid); font-size: .76rem; }
+.gpu-monitor small { grid-column: 1 / -1; color: var(--faint); font-size: .55rem; }
+.gpu-monitor.warm { border-color: #f4bc50; }
+.gpu-monitor.warm strong { color: #f4bc50; }
+.gpu-monitor.cooling, .gpu-monitor.critical { border-color: var(--orange); background: rgba(255, 107, 53, .1); }
+.gpu-monitor.cooling strong, .gpu-monitor.critical strong { color: var(--orange); }
+.gpu-monitor.critical { animation: thermal-pulse .9s ease-in-out infinite alternate; }
+.gpu-monitor.offline strong { color: var(--faint); }
+@keyframes thermal-pulse { to { box-shadow: 0 0 22px rgba(255, 107, 53, .35); } }
+
 .hero { padding: 92px 0 58px; }
 .eyebrow {
   color: var(--acid);
@@ -146,6 +168,30 @@ button { color: inherit; }
 }
 
 .studio-form { padding: clamp(28px, 4vw, 54px); }
+
+.model-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 34px;
+}
+
+.model-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  background: #101210;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+.model-option strong { font-size: .76rem; }
+.model-option small { color: var(--faint); font: .58rem "Cascadia Code", Consolas, monospace; }
+.model-option.active { border-color: var(--acid); background: var(--acid-soft); color: var(--ink); }
+.model-option.active small { color: var(--acid); }
 .field-heading {
   display: flex;
   justify-content: space-between;
@@ -182,6 +228,7 @@ textarea:focus, select:focus {
 
 textarea::placeholder { color: #5f615c; }
 .description-input { min-height: 105px; }
+.direction-help { margin: 9px 0 0; color: var(--faint); font: .62rem/1.55 "Cascadia Code", Consolas, monospace; }
 
 .presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 13px; }
 .preset {
@@ -198,6 +245,28 @@ textarea::placeholder { color: #5f615c; }
 }
 .preset:hover, .preset.active { border-color: var(--acid); color: var(--ink); background: var(--acid-soft); }
 .preset .preset-icon { color: var(--acid); }
+.custom-direction-preset { border-style: dashed; }
+.custom-direction-preset .preset-icon { color: var(--orange); }
+.custom-direction-preset.active { border-color: var(--orange); background: rgba(255, 107, 53, .1); }
+
+.speaker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.speaker-card {
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  background: #101210;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+.speaker-card:hover, .speaker-card.active { border-color: var(--acid); background: var(--acid-soft); color: var(--ink); }
+.speaker-card strong { font-size: .72rem; }
+.speaker-card small { color: var(--faint); font-size: .59rem; line-height: 1.4; }
+.speaker-card .speaker-icon { color: var(--acid); font-size: 1rem; }
 
 .advanced { border-bottom: 1px solid var(--line); padding: 18px 0; }
 .advanced summary {
@@ -249,6 +318,17 @@ textarea::placeholder { color: #5f615c; }
 .result-idle { text-align: center; color: var(--faint); }
 .result-idle p { color: var(--muted); margin: 26px 0 7px; font-size: .82rem; }
 .result-idle > span { font: .65rem "Cascadia Code", Consolas, monospace; }
+.result-idle.generating { width: 100%; }
+.result-idle.generating .idle-art, .result-idle.generating .idle-copy { display: none; }
+.generation-progress { width: 100%; text-align: left; }
+.progress-heading { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.progress-heading span { color: var(--ink); font-size: .78rem; line-height: 1.45; }
+.progress-heading strong { color: var(--acid); font: 700 1rem "Cascadia Code", Consolas, monospace; }
+.progress-track { height: 8px; margin: 18px 0 12px; background: rgba(255,255,255,.08); overflow: hidden; }
+.progress-track i { display: block; width: 0; height: 100%; background: linear-gradient(90deg, var(--acid), #efffb9); transition: width .45s ease; box-shadow: 0 0 16px rgba(200,255,61,.35); }
+.generation-progress small { color: var(--faint); font: .61rem/1.5 "Cascadia Code", Consolas, monospace; }
+.generation-progress.cooling .progress-heading strong, .generation-progress.error .progress-heading strong { color: var(--orange); }
+.generation-progress.cooling .progress-track i, .generation-progress.error .progress-track i { background: var(--orange); }
 .orb { position: relative; width: 120px; height: 120px; margin: auto; border: 1px solid rgba(200,255,61,.18); border-radius: 50%; display: grid; place-items: center; }
 .orb::before, .orb::after { content: ""; position: absolute; border-radius: inherit; border: 1px solid rgba(200,255,61,.08); }
 .orb::before { inset: -14px; }.orb::after { inset: 15px; }
@@ -403,12 +483,16 @@ footer { border-top: 1px solid var(--line); min-height: 86px; display: flex; ali
   .api-strip { grid-template-columns: 1fr; gap: 25px; }
   .hint { display: none; }
   .dialogue-options { grid-template-columns: 1fr 1fr; }
+  .speaker-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 560px) {
   .topbar, main, footer { width: min(100% - 24px, 1180px); }
   .topbar { height: 72px; }
   .server-status span:last-child { display: none; }
+  .topbar-status { gap: 8px; }
+  .gpu-monitor { padding: 6px 8px; }
+  .gpu-monitor small { display: none; }
   .hero { padding-top: 62px; }
   .hero h1 { font-size: 3rem; }
   .studio-form, .result-panel { padding: 24px; }
@@ -420,6 +504,7 @@ footer { border-top: 1px solid var(--line); min-height: 86px; display: flex; ali
   .dialogue-options { grid-template-columns: 1fr; }
   .mode-tabs { width: 100%; }
   .mode-tab { flex: 1; padding-inline: 10px; }
+  .model-switch, .speaker-grid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -21,9 +21,16 @@
         </span>
         <span>VOICE FORGE</span>
       </a>
-      <div class="server-status" id="serverStatus">
-        <span class="status-dot"></span>
-        <span>Connexion…</span>
+      <div class="topbar-status">
+        <div class="gpu-monitor offline" id="gpuMonitor" title="Surveillance thermique du GPU">
+          <span class="gpu-label" id="gpuProfile">GPU · ÉQUILIBRÉ</span>
+          <strong id="gpuTemperature">-- °C</strong>
+          <small id="gpuMemory">VRAM --</small>
+        </div>
+        <div class="server-status" id="serverStatus">
+          <span class="status-dot"></span>
+          <span>Connexion…</span>
+        </div>
       </div>
     </header>
 
@@ -47,6 +54,15 @@
 
       <section class="studio-shell" id="voiceStudio" aria-label="Générateur vocal">
         <form id="speechForm" class="studio-form">
+          <div class="model-switch" aria-label="Modèle TTS pour la voix unique">
+            <button type="button" class="model-option active" data-tts-mode="design" data-target="speech">
+              <strong>VoiceDesign 1.7B</strong><small>Création libre · qualité maximale</small>
+            </button>
+            <button type="button" class="model-option" data-tts-mode="custom" data-target="speech">
+              <strong>CustomVoice 0.6B</strong><small>9 timbres · mode léger</small>
+            </button>
+          </div>
+
           <div class="field-heading">
             <label for="speechText"><span>01</span> Le texte à interpréter</label>
             <output id="characterCount" for="speechText">0 / 4096</output>
@@ -60,21 +76,34 @@
             placeholder="Dans les profondeurs de la montagne, quelque chose vient de s'éveiller…"
           ></textarea>
 
-          <div class="field-heading voice-heading">
-            <label for="voiceDescription"><span>02</span> La direction de voix</label>
-            <span class="hint">Décrivez librement le ton, le rythme et le personnage</span>
+          <div id="designVoiceControls">
+            <div class="field-heading voice-heading">
+              <label for="voiceDescription"><span>02</span> La direction de voix</label>
+              <span class="hint">Décrivez librement le ton, le rythme et le personnage</span>
+            </div>
+
+            <div class="presets" id="presets" aria-label="Styles rapides"></div>
+
+            <textarea
+              id="voiceDescription"
+              name="voiceDescription"
+              class="description-input"
+              rows="3"
+              maxlength="1000"
+              placeholder="Ex. Une voix de démon très grave, ancienne et menaçante, avec une sensation d'écho…"
+            ></textarea>
+            <p class="direction-help">
+              En VoiceDesign, ce texte est transmis au modèle. Soyez précis sur l'âge, la hauteur, le timbre, le rythme et l'émotion.
+            </p>
           </div>
 
-          <div class="presets" id="presets" aria-label="Styles rapides"></div>
-
-          <textarea
-            id="voiceDescription"
-            name="voiceDescription"
-            class="description-input"
-            rows="3"
-            maxlength="1000"
-            placeholder="Ex. Une voix de démon très grave, ancienne et menaçante, avec une sensation d'écho…"
-          ></textarea>
+          <div id="customVoiceControls" hidden>
+            <div class="field-heading voice-heading">
+              <label><span>02</span> Le timbre officiel</label>
+              <span class="hint">Neuf voix Qwen légères</span>
+            </div>
+            <div class="speaker-grid" id="customSpeakers" aria-label="Timbres CustomVoice"></div>
+          </div>
 
           <details class="advanced">
             <summary>Réglages avancés <span aria-hidden="true">+</span></summary>
@@ -86,7 +115,7 @@
           </details>
 
           <div class="form-footer">
-            <p><span class="spark">✦</span> La sortie utilise une voix générée par IA.</p>
+            <p><span class="spark">✦</span> Voix stable · graine fixe · paramètres Qwen natifs.</p>
             <button type="submit" id="generateButton">
               <span class="button-label">Générer la voix</span>
               <span class="button-arrow" aria-hidden="true">↗</span>
@@ -96,11 +125,21 @@
 
         <aside class="result-panel" id="resultPanel">
           <div class="result-idle" id="resultIdle">
-            <div class="orb" aria-hidden="true">
+            <div class="orb idle-art" aria-hidden="true">
               <span></span><span></span><span></span>
             </div>
-            <p>Votre création apparaîtra ici</p>
-            <span>WAV · moteur local · aucune donnée envoyée</span>
+            <p class="idle-copy">Votre création apparaîtra ici</p>
+            <span class="idle-copy">WAV · moteur local · aucune donnée envoyée</span>
+            <div class="generation-progress" id="speechProgress" hidden>
+              <div class="progress-heading">
+                <span id="speechProgressMessage">Préparation…</span>
+                <strong id="speechProgressPercent">0 %</strong>
+              </div>
+              <div class="progress-track" role="progressbar" aria-label="Progression de la synthèse" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <i id="speechProgressBar"></i>
+              </div>
+              <small id="speechProgressDetail">Surveillance thermique active</small>
+            </div>
           </div>
 
           <div class="result-ready" id="resultReady" hidden>
@@ -123,6 +162,15 @@
 
       <section class="studio-shell dialogue-studio" id="dialogueStudio" aria-label="Générateur de dialogue" hidden>
         <form id="dialogueForm" class="studio-form dialogue-form">
+          <div class="model-switch" aria-label="Modèle TTS pour le dialogue">
+            <button type="button" class="model-option active" data-tts-mode="design" data-target="dialogue">
+              <strong>VoiceDesign 1.7B</strong><small>Personnages personnalisés</small>
+            </button>
+            <button type="button" class="model-option" data-tts-mode="custom" data-target="dialogue">
+              <strong>CustomVoice 0.6B</strong><small>Dialogue plus léger</small>
+            </button>
+          </div>
+
           <div class="field-heading">
             <label for="dialogueFile"><span>01</span> Charger le dialogue</label>
             <span class="hint">JSON · 50 répliques maximum</span>
@@ -181,11 +229,21 @@
 
         <aside class="result-panel">
           <div class="result-idle" id="dialogueResultIdle">
-            <div class="dialogue-orb" aria-hidden="true">
+            <div class="dialogue-orb idle-art" aria-hidden="true">
               <span>A</span><i></i><span>B</span>
             </div>
-            <p>Le dialogue assemblé apparaîtra ici</p>
-            <span>UN SEUL WAV · PRÊT À ENREGISTRER</span>
+            <p class="idle-copy">Le dialogue assemblé apparaîtra ici</p>
+            <span class="idle-copy">UN SEUL WAV · PRÊT À ENREGISTRER</span>
+            <div class="generation-progress" id="dialogueProgress" hidden>
+              <div class="progress-heading">
+                <span id="dialogueProgressMessage">Préparation…</span>
+                <strong id="dialogueProgressPercent">0 %</strong>
+              </div>
+              <div class="progress-track" role="progressbar" aria-label="Progression du dialogue" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <i id="dialogueProgressBar"></i>
+              </div>
+              <small id="dialogueProgressDetail">Surveillance thermique active</small>
+            </div>
           </div>
 
           <div class="result-ready" id="dialogueResultReady" hidden>

@@ -6,6 +6,9 @@ export function validateSpeechRequest(body, config) {
       : "";
   const language =
     typeof body?.language === "string" ? body.language.trim() : config.defaultLanguage;
+  const mode = typeof body?.mode === "string" ? body.mode.trim() : config.defaultMode;
+  const speaker = typeof body?.speaker === "string" ? body.speaker.trim() : "";
+  const jobId = typeof body?.jobId === "string" ? body.jobId.trim() : "";
 
   const errors = [];
   if (!text) errors.push("Le champ « text » est obligatoire.");
@@ -18,10 +21,22 @@ export function validateSpeechRequest(body, config) {
   if (!config.languages.includes(language)) {
     errors.push(`Langue inconnue. Valeurs acceptées : ${config.languages.join(", ")}.`);
   }
+  if (!config.modes.some((item) => item.id === mode)) {
+    errors.push("Mode TTS inconnu.");
+  }
+  if (mode === "design" && !voiceDescription) {
+    errors.push("La description de voix est obligatoire en mode VoiceDesign.");
+  }
+  if (mode === "custom" && !config.customSpeakers.some((item) => item.id === speaker)) {
+    errors.push("Le timbre CustomVoice sélectionné est inconnu.");
+  }
+  if (jobId && !/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)) {
+    errors.push("L'identifiant de progression est invalide.");
+  }
 
   return {
     errors,
-    value: { text, voiceDescription, language },
+    value: { text, voiceDescription, language, mode, speaker, jobId },
   };
 }
 
@@ -37,6 +52,10 @@ export function validateDialogueRequest(body, config) {
   const language =
     typeof body?.language === "string" ? body.language.trim() : config.defaultLanguage;
   const pauseMs = Number.isInteger(body?.pauseMs) ? body.pauseMs : 350;
+  const mode = typeof body?.mode === "string" ? body.mode.trim() : config.defaultMode;
+  const speakerA = typeof body?.speakerA === "string" ? body.speakerA.trim() : "";
+  const speakerB = typeof body?.speakerB === "string" ? body.speakerB.trim() : "";
+  const jobId = typeof body?.jobId === "string" ? body.jobId.trim() : "";
   const errors = [];
 
   if (!Array.isArray(body?.elements)) {
@@ -53,7 +72,7 @@ export function validateDialogueRequest(body, config) {
   if (elements.reduce((total, value) => total + value.length, 0) > 20000) {
     errors.push("Le dialogue ne peut pas dépasser 20 000 caractères au total.");
   }
-  if (!voiceADescription || !voiceBDescription) {
+  if (mode === "design" && (!voiceADescription || !voiceBDescription)) {
     errors.push("Deux descriptions de voix sont obligatoires.");
   }
   if (voiceADescription.length > 1000 || voiceBDescription.length > 1000) {
@@ -65,6 +84,18 @@ export function validateDialogueRequest(body, config) {
   if (pauseMs < 0 || pauseMs > 2000) {
     errors.push("La pause doit être comprise entre 0 et 2000 ms.");
   }
+  if (!config.modes.some((item) => item.id === mode)) {
+    errors.push("Mode TTS inconnu.");
+  }
+  if (mode === "custom") {
+    const validSpeakers = new Set(config.customSpeakers.map((item) => item.id));
+    if (!validSpeakers.has(speakerA) || !validSpeakers.has(speakerB)) {
+      errors.push("Les deux timbres CustomVoice doivent être valides.");
+    }
+  }
+  if (jobId && !/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)) {
+    errors.push("L'identifiant de progression est invalide.");
+  }
 
   return {
     errors,
@@ -74,6 +105,10 @@ export function validateDialogueRequest(body, config) {
       voiceBDescription,
       language,
       pauseMs,
+      mode,
+      speakerA,
+      speakerB,
+      jobId,
     },
   };
 }

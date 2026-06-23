@@ -29,6 +29,8 @@ describe("API TTS locale", () => {
     assert.ok(response.body.presets.length >= 13);
     assert.ok(response.body.presets.some((preset) => preset.id === "wizard"));
     assert.ok(response.body.presets.some((preset) => preset.id === "goat"));
+    assert.equal(response.body.customSpeakers.length, 9);
+    assert.ok(response.body.modes.some((mode) => mode.id === "custom"));
   });
 
   it("refuse un texte vide", async () => {
@@ -70,7 +72,7 @@ describe("API TTS locale", () => {
     };
     const response = await request(createApp({ config, synthesize: unavailable }))
       .post("/api/speech")
-      .send({ text: "Bonjour" })
+      .send({ text: "Bonjour", voiceDescription: "Voix naturelle" })
       .expect(503);
 
     assert.match(response.body.error, /Qwen3-TTS local/);
@@ -115,5 +117,82 @@ describe("API TTS locale", () => {
       .expect(400);
 
     assert.match(response.body.error, /tableau/);
+  });
+
+  it("accepte le mode CustomVoice 0.6B et un timbre officiel", async () => {
+    let received;
+    const capture = async (payload) => {
+      received = payload;
+      return fakeSynthesize();
+    };
+    await request(createApp({ config, synthesize: capture, synthesizeDialogue: fakeDialogue }))
+      .post("/api/speech")
+      .send({
+        text: "Bonjour",
+        language: "French",
+        mode: "custom",
+        speaker: "Ryan",
+      })
+      .expect(200);
+
+    assert.equal(received.mode, "custom");
+    assert.equal(received.speaker, "Ryan");
+  });
+
+  it("refuse un timbre CustomVoice inconnu", async () => {
+    const response = await request(createApp({ config, synthesize: fakeSynthesize, synthesizeDialogue: fakeDialogue }))
+      .post("/api/speech")
+      .send({ text: "Bonjour", mode: "custom", speaker: "Inconnu" })
+      .expect(400);
+
+    assert.match(response.body.error, /inconnu/);
+  });
+
+  it("expose la progression et la température du GPU", async () => {
+    const getEngineStatus = async () => ({
+      ready: true,
+      thermal_state: "normal",
+      gpu: { available: true, temperature: 62, memory_used_mb: 2048 },
+      progress: { job_id: "speech_test", stage: "generating", percent: 45 },
+    });
+    const response = await request(createApp({ config, getEngineStatus }))
+      .get("/api/status")
+      .expect(200);
+
+    assert.equal(response.body.gpu.temperature, 62);
+    assert.equal(response.body.progress.percent, 45);
+  });
+
+  it("transmet un identifiant de progression valide", async () => {
+    let received;
+    const capture = async (payload) => {
+      received = payload;
+      return fakeSynthesize();
+    };
+    await request(createApp({ config, synthesize: capture }))
+      .post("/api/speech")
+      .send({
+        text: "Bonjour",
+        voiceDescription: "Voix naturelle",
+        jobId: "speech_123abc",
+      })
+      .expect(200);
+
+    assert.equal(received.jobId, "speech_123abc");
+  });
+
+  it("transmet exactement la nouvelle direction VoiceDesign", async () => {
+    let received;
+    const capture = async (payload) => {
+      received = payload;
+      return fakeSynthesize();
+    };
+    const direction = "Une jeune alchimiste, voix rauque, rapide et enthousiaste.";
+    await request(createApp({ config, synthesize: capture }))
+      .post("/api/speech")
+      .send({ text: "Potion prête !", voiceDescription: direction, mode: "design" })
+      .expect(200);
+
+    assert.equal(received.voiceDescription, direction);
   });
 });
