@@ -45,6 +45,22 @@ const PRESETS = [
     language: "French",
   },
   {
+    id: "death-metal",
+    name: "Death metal",
+    icon: "♫",
+    description:
+      "Une voix death metal masculine très grave, gutturale et massive, avec un growl profond et une forte résonance de poitrine. Chaque mot reste clairement articulé, sans rugissement non verbal ni saturation excessive.",
+    language: "French",
+  },
+  {
+    id: "black-metal",
+    name: "Black metal",
+    icon: "✢",
+    description:
+      "Une voix black metal aiguë, glaciale, râpeuse et agressive, proche d'un shriek perçant. Diction intelligible, énergie sombre et réverbération froide, sans cri non verbal ni distorsion excessive.",
+    language: "French",
+  },
+  {
     id: "spectre",
     name: "Spectre",
     icon: "◌",

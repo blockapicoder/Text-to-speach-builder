@@ -266,7 +266,19 @@ def voice_direction(description: str) -> str:
     words = normalized_words(description)
     directions = []
 
-    if any(word in words for word in ("demon", "diable", "infernal")):
+    if any(word in words for word in ("death metal", "death-metal", "growl death")):
+        directions.append(
+            "Perform an intelligible death-metal vocal growl: extremely deep, guttural, "
+            "powerful and resonant, while articulating every supplied word clearly. "
+            "Do not replace lyrics with nonverbal roaring or breathing."
+        )
+    elif any(word in words for word in ("black metal", "black-metal", "shriek")):
+        directions.append(
+            "Perform an intelligible black-metal vocal shriek: high, icy, harsh, raspy "
+            "and sinister, with every supplied word clearly pronounced. "
+            "Do not replace lyrics with nonverbal screaming, whispering or breathing."
+        )
+    elif any(word in words for word in ("demon", "diable", "infernal")):
         directions.append(
             "Use an extremely deep adult male bass voice: very low fundamental pitch, "
             "massive chest resonance, ominous and inhuman, slow and threatening. "
@@ -342,7 +354,11 @@ def audio_effects(description: str) -> list[str]:
     tremolo = 0
     overdrive = 0
 
-    if any(word in words for word in ("demon", "diable", "infernal")):
+    if any(word in words for word in ("death metal", "death-metal", "growl death")):
+        pitch, tempo, bass, reverb = -180, 0.96, 5, 18
+    elif any(word in words for word in ("black metal", "black-metal", "shriek")):
+        pitch, tempo, treble, reverb = 120, 1.02, 3, 30
+    elif any(word in words for word in ("demon", "diable", "infernal")):
         pitch, tempo, bass, reverb = -500, 0.90, 7, 28
     elif any(word in words for word in ("troll", "ogre", "orc")):
         pitch, tempo, bass = -320, 0.92, 5

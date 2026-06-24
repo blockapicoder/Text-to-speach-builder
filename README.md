@@ -151,7 +151,7 @@ Sources officielles : [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) et [modè
 
 ## Deux modes de génération
 
-- **VoiceDesign 1.7B** : comprend une description libre de voix et alimente les personnages Démon, Troll, Magicien, Chèvre, etc. C'est le mode le plus expressif, mais il remplit presque entièrement une RTX 2060 6 Go.
+- **VoiceDesign 1.7B** : comprend une description libre de voix et alimente les personnages Démon, Troll, Death metal, Black metal, Magicien, Chèvre, etc. C'est le mode le plus expressif, mais il remplit presque entièrement une RTX 2060 6 Go.
 - **CustomVoice 0.6B** : propose les neuf timbres officiels Vivian, Serena, Uncle Fu, Dylan, Eric, Ryan, Aiden, Ono Anna et Sohee. Il consomme nettement moins de VRAM et convient mieux aux textes et dialogues longs.
 
 Pour un texte VoiceDesign découpé en plusieurs segments, Voice Forge crée d'abord une courte référence technique avec VoiceDesign. Cette phrase sert uniquement à extraire le timbre et n'est jamais incluse dans le WAV final. **Tous** les segments du texte de l'utilisateur, y compris le premier, sont ensuite prononcés par Qwen3-TTS Base 0.6B avec la même empreinte. Seule l'empreinte du locuteur est transmise : le texte et les codes audio de référence ne sont pas réinjectés, ce qui évite de répéter un mot ou de remplacer la première phrase par une vocalisation. Sur GPU NVIDIA, Base fonctionne en FP32 natif afin d'éviter les crépitements de l'INT8 et l'instabilité numérique observée en FP16 sur les cartes Turing.

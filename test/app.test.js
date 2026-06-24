@@ -26,9 +26,11 @@ describe("API TTS locale", () => {
 
     assert.match(response.body.model, /Qwen3-TTS/);
     assert.equal(response.body.defaultLanguage, "French");
-    assert.ok(response.body.presets.length >= 13);
+    assert.ok(response.body.presets.length >= 15);
     assert.ok(response.body.presets.some((preset) => preset.id === "wizard"));
     assert.ok(response.body.presets.some((preset) => preset.id === "goat"));
+    assert.ok(response.body.presets.some((preset) => preset.id === "death-metal"));
+    assert.ok(response.body.presets.some((preset) => preset.id === "black-metal"));
     assert.equal(response.body.customSpeakers.length, 9);
     assert.ok(response.body.modes.some((mode) => mode.id === "custom"));
   });
