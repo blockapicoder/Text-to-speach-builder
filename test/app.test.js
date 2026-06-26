@@ -17,6 +17,11 @@ const fakeDialogue = async () => ({
   contentType: "audio/wav",
   extension: "wav",
 });
+const fakeBatch = async () => ({
+  bytes: Buffer.from("fake-batch-zip"),
+  contentType: "application/zip",
+  extension: "zip",
+});
 
 describe("API TTS locale", () => {
   it("expose la configuration open source", async () => {
@@ -119,6 +124,101 @@ describe("API TTS locale", () => {
       .expect(400);
 
     assert.match(response.body.error, /tableau/);
+  });
+
+  it("renvoie une archive pour un WAV par paire de répliques", async () => {
+    let received;
+    const captureDialogue = async (payload) => {
+      received = payload;
+      return {
+        bytes: Buffer.from("fake-dialogue-zip"),
+        contentType: "application/zip",
+        extension: "zip",
+      };
+    };
+    const response = await request(createApp({
+      config,
+      synthesize: fakeSynthesize,
+      synthesizeDialogue: captureDialogue,
+    }))
+      .post("/api/dialogue")
+      .send({
+        elements: ["A1", "B1", "A2", "B2", "A3"],
+        voiceADescription: "Un vieux magicien",
+        voiceBDescription: "Une chèvre parlante",
+        splitPairs: true,
+      })
+      .expect(200)
+      .expect("Content-Type", /application\/zip/);
+
+    assert.equal(received.splitPairs, true);
+    assert.match(response.headers["content-disposition"], /\.zip/);
+    assert.equal(response.headers["x-dialogue-files"], "3");
+    assert.equal(Number(response.headers["content-length"]), Buffer.byteLength("fake-dialogue-zip"));
+  });
+
+  it("renvoie une archive avec un WAV par fichier importé", async () => {
+    let received;
+    const captureBatch = async (payload) => {
+      received = payload;
+      return fakeBatch();
+    };
+    const response = await request(createApp({
+      config,
+      synthesize: fakeSynthesize,
+      synthesizeDialogue: fakeDialogue,
+      synthesizeBatch: captureBatch,
+    }))
+      .post("/api/batch")
+      .send({
+        files: [
+          { name: "intro.txt", text: "Bonjour" },
+          { name: "scene.md", text: "La scène commence." },
+        ],
+        voiceDescription: "Une voix grave et calme.",
+        language: "French",
+      })
+      .expect(200)
+      .expect("Content-Type", /application\/zip/);
+
+    assert.equal(received.files.length, 2);
+    assert.equal(received.files[0].name, "intro.txt");
+    assert.equal(response.headers["x-batch-files"], "2");
+    assert.match(response.headers["content-disposition"], /\.zip/);
+    assert.equal(Number(response.headers["content-length"]), Buffer.byteLength("fake-batch-zip"));
+  });
+
+  it("refuse un lot de fichiers mal formé", async () => {
+    const response = await request(createApp({
+      config,
+      synthesize: fakeSynthesize,
+      synthesizeDialogue: fakeDialogue,
+      synthesizeBatch: fakeBatch,
+    }))
+      .post("/api/batch")
+      .send({ files: [{ name: "vide.txt", text: "" }] })
+      .expect(400);
+
+    assert.match(response.body.error, /non vide/);
+  });
+
+  it("décharge les modèles à la demande", async () => {
+    let called = 0;
+    const unloadEngine = async () => {
+      called += 1;
+      return { ok: true, freed_mb: 4096, unloaded_model: "Qwen/Test" };
+    };
+    const response = await request(createApp({
+      config,
+      synthesize: fakeSynthesize,
+      synthesizeDialogue: fakeDialogue,
+      unloadEngine,
+    }))
+      .post("/api/unload")
+      .expect(200);
+
+    assert.equal(called, 1);
+    assert.equal(response.body.freed_mb, 4096);
   });
 
   it("accepte le mode CustomVoice 0.6B et un timbre officiel", async () => {

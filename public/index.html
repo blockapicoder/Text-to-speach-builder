@@ -27,6 +27,9 @@
           <strong id="gpuTemperature">-- °C</strong>
           <small id="gpuMemory">VRAM --</small>
         </div>
+        <button type="button" class="cleanup-button" id="unloadModelsButton" title="Libérer la VRAM sans supprimer les modèles du disque">
+          Libérer les modèles
+        </button>
         <div class="server-status" id="serverStatus">
           <span class="status-dot"></span>
           <span>Connexion…</span>
@@ -72,9 +75,18 @@
             name="text"
             rows="6"
             maxlength="4096"
-            required
             placeholder="Dans les profondeurs de la montagne, quelque chose vient de s'éveiller…"
           ></textarea>
+
+          <label class="file-drop batch-drop" id="batchFileDrop" for="batchFiles">
+            <input id="batchFiles" type="file" multiple accept=".txt,.md,.text,.json,.csv,text/*,application/json" />
+            <span class="file-icon" aria-hidden="true">â‡§</span>
+            <strong id="batchFileDropTitle">Importer plusieurs fichiers texte</strong>
+            <small>Optionnel : un WAV par fichier, avec le mÃªme nom, dans une archive ZIP.</small>
+          </label>
+          <div class="batch-preview empty" id="batchPreview">
+            <p>Aucun lot chargÃ©. Le champ texte ci-dessus reste utilisÃ© en mode voix unique.</p>
+          </div>
 
           <div id="designVoiceControls">
             <div class="field-heading voice-heading">
@@ -206,6 +218,11 @@
               <option value="650">Longue · 650 ms</option>
               <option value="1000">Théâtrale · 1 s</option>
             </select>
+            <label for="dialogueOutput">Fichiers de sortie</label>
+            <select id="dialogueOutput">
+              <option value="single" selected>Un seul WAV</option>
+              <option value="pairs">Un WAV par échange (ZIP)</option>
+            </select>
           </div>
 
           <div class="dialogue-preview-heading">
@@ -233,7 +250,7 @@
               <span>A</span><i></i><span>B</span>
             </div>
             <p class="idle-copy">Le dialogue assemblé apparaîtra ici</p>
-            <span class="idle-copy">UN SEUL WAV · PRÊT À ENREGISTRER</span>
+            <span class="idle-copy">WAV UNIQUE OU ARCHIVE PAR ÉCHANGE</span>
             <div class="generation-progress" id="dialogueProgress" hidden>
               <div class="progress-heading">
                 <span id="dialogueProgressMessage">Préparation…</span>

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { Agent } from "undici";
 
 import { getConfig } from "./config.js";
-import { validateDialogueRequest, validateSpeechRequest } from "./validation.js";
+import { validateBatchRequest, validateDialogueRequest, validateSpeechRequest } from "./validation.js";
 
 const engineDispatcher = new Agent({
   connectTimeout: 10_000,
@@ -55,6 +55,7 @@ async function callLocalDialogueEngine(config, payload) {
       speaker_a: payload.speakerA || null,
       speaker_b: payload.speakerB || null,
       job_id: payload.jobId || null,
+      split_pairs: payload.splitPairs,
     }),
     dispatcher: engineDispatcher,
   });
@@ -67,10 +68,41 @@ async function callLocalDialogueEngine(config, payload) {
     throw error;
   }
 
+  const contentType = engineResponse.headers.get("content-type") || "audio/wav";
   return {
     bytes: Buffer.from(await engineResponse.arrayBuffer()),
-    contentType: engineResponse.headers.get("content-type") || "audio/wav",
-    extension: "wav",
+    contentType,
+    extension: contentType.includes("zip") ? "zip" : "wav",
+  };
+}
+
+async function callLocalBatchEngine(config, payload) {
+  const engineResponse = await fetch(`${config.engineUrl}/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      files: payload.files,
+      voice_description: payload.voiceDescription || "Voix naturelle, expressive et claire.",
+      language: payload.language,
+      mode: payload.mode,
+      speaker: payload.speaker || null,
+      job_id: payload.jobId || null,
+    }),
+    dispatcher: engineDispatcher,
+  });
+
+  if (!engineResponse.ok) {
+    const detail = await engineResponse.json().catch(() => ({}));
+    const error = new Error(detail.detail || "Le moteur local a refusÃ© le lot.");
+    error.status = engineResponse.status;
+    error.publicMessage = detail.detail;
+    throw error;
+  }
+
+  return {
+    bytes: Buffer.from(await engineResponse.arrayBuffer()),
+    contentType: engineResponse.headers.get("content-type") || "application/zip",
+    extension: "zip",
   };
 }
 
@@ -78,11 +110,20 @@ export function createApp({
   config = getConfig(),
   synthesize = (payload) => callLocalEngine(config, payload),
   synthesizeDialogue = (payload) => callLocalDialogueEngine(config, payload),
+  synthesizeBatch = (payload) => callLocalBatchEngine(config, payload),
   getEngineStatus = async () => {
     const engineResponse = await fetch(`${config.engineUrl}/status`, {
       signal: AbortSignal.timeout(2500),
     });
     if (!engineResponse.ok) throw new Error("Statut moteur indisponible.");
+    return engineResponse.json();
+  },
+  unloadEngine = async () => {
+    const engineResponse = await fetch(`${config.engineUrl}/unload`, {
+      method: "POST",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!engineResponse.ok) throw new Error("Impossible de libérer les modèles.");
     return engineResponse.json();
   },
 } = {}) {
@@ -133,6 +174,15 @@ export function createApp({
     }
   });
 
+  app.post("/api/unload", async (_request, response, next) => {
+    try {
+      response.set("Cache-Control", "no-store");
+      return response.json(await unloadEngine());
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.post("/api/speech", async (request, response, next) => {
     const { errors, value } = validateSpeechRequest(request.body, config);
     if (errors.length) {
@@ -155,6 +205,29 @@ export function createApp({
     }
   });
 
+  app.post("/api/batch", async (request, response, next) => {
+    const { errors, value } = validateBatchRequest(request.body, config);
+    if (errors.length) {
+      return response.status(400).json({ error: errors.join(" ") });
+    }
+
+    try {
+      const archive = await synthesizeBatch(value);
+      const safeTimestamp = new Date().toISOString().replaceAll(":", "-");
+      response.set({
+        "Content-Type": archive.contentType,
+        "Content-Length": String(archive.bytes.length),
+        "Content-Disposition": `inline; filename="voice-forge-lot-${safeTimestamp}.${archive.extension}"`,
+        "Cache-Control": "no-store",
+        "X-TTS-Engine": "qwen3-tts-local",
+        "X-Batch-Files": String(value.files.length),
+      });
+      return response.send(archive.bytes);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.post("/api/dialogue", async (request, response, next) => {
     const { errors, value } = validateDialogueRequest(request.body, config);
     if (errors.length) {
@@ -171,6 +244,7 @@ export function createApp({
         "Cache-Control": "no-store",
         "X-TTS-Engine": "qwen3-tts-local",
         "X-Dialogue-Lines": String(value.elements.length),
+        "X-Dialogue-Files": String(value.splitPairs ? Math.ceil(value.elements.length / 2) : 1),
       });
       return response.send(audio.bytes);
     } catch (error) {

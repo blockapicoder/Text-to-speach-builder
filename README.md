@@ -21,6 +21,8 @@ Pour l'utiliser, double-cliquer sur `VoiceForge.exe`. Il faut conserver tout le 
 
 Le fonctionnement est forcé hors ligne avec `HF_HUB_OFFLINE=1` et `TRANSFORMERS_OFFLINE=1`. Le pilote NVIDIA et Microsoft Edge WebView2 restent des composants Windows requis. Aucun runtime Python, Node.js ou Docker système n'est nécessaire.
 
+Le bouton **Libérer les modèles** dans la barre supérieure décharge le modèle actif et vide le cache CUDA afin de rendre la VRAM aux autres applications. Il ne supprime aucun fichier hors ligne du disque. Le modèle requis est rechargé automatiquement lors de la prochaine génération.
+
 Pour reconstruire le dossier portable depuis les sources sur une machine connectée :
 
 ```powershell
@@ -200,8 +202,29 @@ await audio.play();
 - `GET /api/health` : disponibilité du moteur local.
 - `GET /api/status` : progression courante, température, VRAM, charge et puissance GPU.
 - `GET /api/config` : langues, styles rapides et limite de caractères.
+- `POST /api/batch` : génère une archive ZIP contenant un WAV par fichier texte importé.
 - `POST /api/dialogue` : génère et assemble un dialogue alternant deux voix.
 - Le moteur FastAPI est uniquement exposé sur la boucle locale `127.0.0.1:8001`.
+
+### Lots de fichiers texte
+
+Dans l'onglet **Voix unique**, le bloc **Importer plusieurs fichiers texte** permet de charger plusieurs fichiers en une seule fois. Voice Forge applique la voix sélectionnée à tout le lot, puis renvoie une archive ZIP. Chaque entrée conserve le nom du fichier d'origine avec l'extension `.wav` : `chapitre-01.txt` devient `chapitre-01.wav`.
+
+Exemple API :
+
+```json
+{
+  "files": [
+    { "name": "intro.txt", "text": "Bonjour." },
+    { "name": "scene.md", "text": "La scène commence." }
+  ],
+  "voiceDescription": "Une voix grave, calme et narrative.",
+  "language": "French",
+  "mode": "design"
+}
+```
+
+La réponse est une archive `application/zip` contenant les WAV.
 
 ## Dialogues à deux voix
 
@@ -225,7 +248,7 @@ Exemple :
 }
 ```
 
-Les index pairs (`0`, `2`, `4`…) utilisent la première voix et les index impairs (`1`, `3`, `5`…) la deuxième. L'interface permet de choisir la durée des silences, d'écouter le résultat puis de l'enregistrer dans un unique fichier WAV. Un fichier prêt à tester est fourni dans `examples/dialogue.json`.
+Les index pairs (`0`, `2`, `4`…) utilisent la première voix et les index impairs (`1`, `3`, `5`…) la deuxième. L'interface permet de choisir la durée des silences et le format de sortie : soit un dialogue complet dans un WAV, soit une archive ZIP contenant un WAV par échange (`0+1`, `2+3`, etc.). Un tableau de `n` répliques produit donc `ceil(n/2)` fichiers ; si `n` est impair, la dernière réplique est enregistrée seule. Un fichier prêt à tester est fourni dans `examples/dialogue.json`.
 
 ## Développement de l'interface
 

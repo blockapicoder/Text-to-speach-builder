@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 import unicodedata
+import zipfile
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -94,6 +95,21 @@ class DialogueRequest(BaseModel):
     mode: str = "design"
     speaker_a: str | None = None
     speaker_b: str | None = None
+    job_id: str | None = Field(default=None, max_length=80)
+    split_pairs: bool = False
+
+
+class BatchFileRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=180)
+    text: str = Field(min_length=1, max_length=4096)
+
+
+class BatchRequest(BaseModel):
+    files: list[BatchFileRequest] = Field(min_length=1, max_length=30)
+    voice_description: str = Field(default="", max_length=1000)
+    language: str = "French"
+    mode: str = "design"
+    speaker: str | None = None
     job_id: str | None = Field(default=None, max_length=80)
 
 
@@ -471,14 +487,18 @@ def smooth_wav_edges(wav_bytes: bytes, fade_ms: int = 6) -> bytes:
 
 
 def unload_model():
+    unloaded_model = engine.model_id
     if engine.model is not None:
         print(f"Déchargement du modèle {engine.model_id}…", flush=True)
         engine.model = None
         engine.mode = None
         engine.model_id = None
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        with suppress(Exception):
+            torch.cuda.ipc_collect()
+    return unloaded_model
 
 
 def load_model(mode: str = DEFAULT_MODE, job_id: str | None = None):
@@ -576,6 +596,33 @@ def status():
         "thermal_state": thermal_state,
         "power_profile": POWER_PROFILE,
         "progress": engine.progress,
+    }
+
+
+@app.post("/unload")
+async def unload():
+    async with engine.lock:
+        before = await asyncio.to_thread(read_gpu_stats)
+        unloaded_model = await asyncio.to_thread(unload_model)
+        await asyncio.sleep(0.5)
+        after = await asyncio.to_thread(read_gpu_stats)
+        if after.get("available"):
+            engine.gpu = after
+        update_progress(None, "idle", 0, "Modèles déchargés · prêt à recharger")
+
+    memory_before = before.get("memory_used_mb")
+    memory_after = after.get("memory_used_mb")
+    freed_mb = (
+        max(0, memory_before - memory_after)
+        if isinstance(memory_before, int) and isinstance(memory_after, int)
+        else None
+    )
+    return {
+        "ok": True,
+        "unloaded_model": unloaded_model,
+        "freed_mb": freed_mb,
+        "gpu": after,
+        "message": "Modèle déchargé. Il sera rechargé automatiquement à la prochaine génération.",
     }
 
 
@@ -796,6 +843,14 @@ def encode_waveform(waveform, sample_rate: int, description: str = "") -> bytes:
     return process_audio(wav_bytes, description) if description else wav_bytes
 
 
+def safe_wav_filename(name: str, fallback: str) -> str:
+    stem = Path(name).stem or fallback
+    stem = unicodedata.normalize("NFKD", stem)
+    stem = "".join(character for character in stem if not unicodedata.combining(character))
+    stem = re.sub(r"[^a-zA-Z0-9._ -]+", "-", stem).strip(" .-_")
+    return f"{(stem or fallback)[:80]}.wav"
+
+
 def synthesize_chunk(payload: SpeechRequest, text: str, voice_clone_prompt=None) -> bytes:
     waveform, sample_rate = generate_chunk_waveform(payload, text, voice_clone_prompt)
     description = payload.voice_description if payload.mode == "design" else ""
@@ -873,7 +928,7 @@ def synthesize_dialogue(payload: DialogueRequest) -> bytes:
     prepared = [(index, text, split_text(text)) for index, text in enumerate(payload.elements)]
     total_chunks = sum(len(chunks) for _, _, chunks in prepared)
     completed_chunks = 0
-    segments = []
+    rendered_lines = []
     for index, text, chunks in prepared:
         even = index % 2 == 0
         line_payload = SpeechRequest(
@@ -901,9 +956,62 @@ def synthesize_dialogue(payload: DialogueRequest) -> bytes:
             completed_chunks += 1
             if completed_chunks < total_chunks:
                 cool_down_between_segments(payload.job_id)
-        segments.append(concatenate_speech_chunks(line_segments, chunks))
+        rendered_lines.append(concatenate_speech_chunks(line_segments, chunks))
     update_progress(payload.job_id, "assembling", 92, "Assemblage du dialogue…")
-    return concatenate_wavs(segments, payload.pause_ms, "dialogue")
+    if not payload.split_pairs:
+        return concatenate_wavs(rendered_lines, payload.pause_ms, "dialogue")
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+        for pair_index, start in enumerate(range(0, len(rendered_lines), 2), start=1):
+            pair_lines = rendered_lines[start : start + 2]
+            pair_audio = concatenate_wavs(
+                pair_lines, payload.pause_ms, f"echange-{pair_index:03d}"
+            )
+            first_line = start + 1
+            last_line = start + len(pair_lines)
+            output.writestr(
+                f"echange-{pair_index:03d}-repliques-{first_line:03d}-{last_line:03d}.wav",
+                pair_audio,
+            )
+    return archive.getvalue()
+
+
+def synthesize_batch(payload: BatchRequest) -> bytes:
+    archive = io.BytesIO()
+    used_names = set()
+    total = len(payload.files)
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+        for index, item in enumerate(payload.files, start=1):
+            update_progress(
+                payload.job_id,
+                "batch",
+                5 + round((index - 1) / total * 90),
+                f"Fichier {index}/{total} : {item.name}",
+                index,
+                total,
+            )
+            # Le pipeline VoiceDesign long peut basculer temporairement sur le modèle Base
+            # pour stabiliser l'identité vocale. On recharge donc le mode demandé au début
+            # de chaque fichier pour éviter qu'un fichier suivant hérite du mauvais moteur.
+            load_model(payload.mode, payload.job_id)
+            speech_payload = SpeechRequest(
+                text=item.text,
+                voice_description=payload.voice_description,
+                language=payload.language,
+                mode=payload.mode,
+                speaker=payload.speaker,
+                job_id=payload.job_id,
+            )
+            audio = synthesize(speech_payload)
+            filename = safe_wav_filename(item.name, f"fichier-{index:03d}")
+            if filename.lower() in used_names:
+                filename = safe_wav_filename(f"{Path(filename).stem}-{index:03d}", f"fichier-{index:03d}")
+            used_names.add(filename.lower())
+            output.writestr(filename, audio)
+            if index < total:
+                cool_down_between_segments(payload.job_id)
+    return archive.getvalue()
 
 
 @app.post("/speech")
@@ -941,6 +1049,47 @@ async def speech(payload: SpeechRequest):
         raise HTTPException(status_code=500, detail="La synthèse locale a échoué.") from error
 
 
+@app.post("/batch")
+async def batch(payload: BatchRequest):
+    if any(not item.text.strip() for item in payload.files):
+        raise HTTPException(status_code=400, detail="Les fichiers ne peuvent pas Ãªtre vides.")
+    if sum(len(item.text) for item in payload.files) > 60000:
+        raise HTTPException(status_code=400, detail="Le lot est trop long.")
+
+    try:
+        async with engine.lock:
+            engine.thermal_stop = False
+            update_progress(payload.job_id, "queued", 1, "PrÃ©paration du lot de fichiersâ€¦")
+            await asyncio.to_thread(wait_for_safe_temperature, payload.job_id)
+            await asyncio.to_thread(load_model, payload.mode, payload.job_id)
+            archive = await asyncio.to_thread(synthesize_batch, payload)
+            update_progress(payload.job_id, "done", 100, "Lot prÃªt")
+        return Response(
+            content=archive,
+            media_type="application/zip",
+            headers={
+                "Cache-Control": "no-store",
+                "X-TTS-Model": engine.model_id,
+                "X-TTS-Mode": engine.mode,
+                "X-Batch-Files": str(len(payload.files)),
+            },
+        )
+    except torch.cuda.OutOfMemoryError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], "MÃ©moire GPU insuffisante")
+        torch.cuda.empty_cache()
+        raise HTTPException(
+            status_code=507,
+            detail="MÃ©moire GPU insuffisante. RÃ©duisez le lot ou utilisez un mode plus lÃ©ger.",
+        ) from error
+    except ThermalProtectionError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], "La gÃ©nÃ©ration du lot a Ã©chouÃ©")
+        print(f"Erreur de lot: {error}", flush=True)
+        raise HTTPException(status_code=500, detail="La gÃ©nÃ©ration du lot a Ã©chouÃ©.") from error
+
+
 @app.post("/dialogue")
 async def dialogue(payload: DialogueRequest):
     if any(not element.strip() for element in payload.elements):
@@ -956,14 +1105,16 @@ async def dialogue(payload: DialogueRequest):
             await asyncio.to_thread(load_model, payload.mode, payload.job_id)
             audio = await asyncio.to_thread(synthesize_dialogue, payload)
             update_progress(payload.job_id, "done", 100, "Dialogue prêt")
+        file_count = (len(payload.elements) + 1) // 2 if payload.split_pairs else 1
         return Response(
             content=audio,
-            media_type="audio/wav",
+            media_type="application/zip" if payload.split_pairs else "audio/wav",
             headers={
                 "Cache-Control": "no-store",
                 "X-TTS-Model": engine.model_id,
                 "X-TTS-Mode": engine.mode,
                 "X-Dialogue-Lines": str(len(payload.elements)),
+                "X-Dialogue-Files": str(file_count),
             },
         )
     except torch.cuda.OutOfMemoryError as error:

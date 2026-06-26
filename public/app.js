@@ -1,6 +1,10 @@
 const elements = {
   form: document.querySelector("#speechForm"),
   text: document.querySelector("#speechText"),
+  batchFiles: document.querySelector("#batchFiles"),
+  batchFileDrop: document.querySelector("#batchFileDrop"),
+  batchFileDropTitle: document.querySelector("#batchFileDropTitle"),
+  batchPreview: document.querySelector("#batchPreview"),
   description: document.querySelector("#voiceDescription"),
   language: document.querySelector("#speechLanguage"),
   characterCount: document.querySelector("#characterCount"),
@@ -28,6 +32,7 @@ const elements = {
   dialogueVoiceB: document.querySelector("#dialogueVoiceB"),
   dialogueLanguage: document.querySelector("#dialogueLanguage"),
   dialoguePause: document.querySelector("#dialoguePause"),
+  dialogueOutput: document.querySelector("#dialogueOutput"),
   dialoguePreview: document.querySelector("#dialoguePreview"),
   dialogueCount: document.querySelector("#dialogueCount"),
   dialogueButton: document.querySelector("#generateDialogueButton"),
@@ -47,6 +52,7 @@ const elements = {
   gpuProfile: document.querySelector("#gpuProfile"),
   gpuTemperature: document.querySelector("#gpuTemperature"),
   gpuMemory: document.querySelector("#gpuMemory"),
+  unloadModels: document.querySelector("#unloadModelsButton"),
   speechProgress: document.querySelector("#speechProgress"),
   speechProgressMessage: document.querySelector("#speechProgressMessage"),
   speechProgressPercent: document.querySelector("#speechProgressPercent"),
@@ -60,9 +66,13 @@ const elements = {
 };
 
 let currentAudioUrl = null;
+let currentAudioExtension = "wav";
+let currentAudioDownloadName = null;
 let currentDialogueAudioUrl = null;
+let batchFiles = [];
 let dialogueElements = [];
 let dialogueFileName = "dialogue";
+let currentDialogueExtension = "wav";
 let speechTtsMode = "design";
 let dialogueTtsMode = "design";
 let selectedCustomSpeaker = "Ryan";
@@ -344,6 +354,10 @@ function resetDialogueResult() {
   elements.dialoguePlayer.removeAttribute("src");
   if (currentDialogueAudioUrl) URL.revokeObjectURL(currentDialogueAudioUrl);
   currentDialogueAudioUrl = null;
+  currentDialogueExtension = "wav";
+  elements.dialoguePlayer.hidden = false;
+  elements.dialogueWaveform.hidden = false;
+  elements.saveDialogue.textContent = "Enregistrer le dialogue";
   elements.dialogueReady.hidden = true;
   elements.dialogueIdle.hidden = false;
   hideProgress("dialogue");
@@ -415,11 +429,78 @@ async function loadDialogueFile(file) {
   }
 }
 
+function renderBatchPreview() {
+  elements.batchPreview.replaceChildren();
+  elements.batchPreview.classList.toggle("empty", batchFiles.length === 0);
+  if (!batchFiles.length) {
+    const message = document.createElement("p");
+    message.textContent = "Aucun lot chargÃ©. Le champ texte ci-dessus reste utilisÃ© en mode voix unique.";
+    elements.batchPreview.append(message);
+    elements.batchFileDropTitle.textContent = "Importer plusieurs fichiers texte";
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "batch-file-list";
+  for (const file of batchFiles) {
+    const item = document.createElement("span");
+    item.textContent = `${file.name} â†’ ${file.name.replace(/\.[^.]+$/, "") || file.name}.wav`;
+    list.append(item);
+  }
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "batch-clear";
+  clear.textContent = "Retirer le lot";
+  clear.addEventListener("click", () => {
+    batchFiles = [];
+    elements.batchFiles.value = "";
+    elements.batchFileDrop.classList.remove("loaded");
+    renderBatchPreview();
+    resetResult();
+  });
+  elements.batchPreview.append(list, clear);
+  elements.batchFileDropTitle.textContent = `${batchFiles.length} fichier${batchFiles.length > 1 ? "s" : ""} chargÃ©${batchFiles.length > 1 ? "s" : ""}`;
+}
+
+async function loadBatchFiles(files) {
+  const selected = Array.from(files || []);
+  if (!selected.length) return;
+  try {
+    if (selected.length > 30) {
+      throw new Error("Le lot est limitÃ© Ã  30 fichiers.");
+    }
+    const loaded = [];
+    for (const file of selected) {
+      const text = (await file.text()).trim();
+      if (!text) throw new Error(`${file.name} est vide.`);
+      if (text.length > configuration.maxCharacters) {
+        throw new Error(`${file.name} dÃ©passe ${configuration.maxCharacters} caractÃ¨res.`);
+      }
+      loaded.push({ name: file.name, text });
+    }
+    batchFiles = loaded;
+    elements.batchFileDrop.classList.add("loaded");
+    renderBatchPreview();
+    resetResult();
+  } catch (error) {
+    batchFiles = [];
+    elements.batchFiles.value = "";
+    elements.batchFileDrop.classList.remove("loaded");
+    renderBatchPreview();
+    showToast(error.message || "Impossible de charger ces fichiers.");
+  }
+}
+
 function resetResult() {
   elements.player.pause();
   elements.player.removeAttribute("src");
   if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
   currentAudioUrl = null;
+  currentAudioExtension = "wav";
+  currentAudioDownloadName = null;
+  elements.player.hidden = false;
+  elements.waveform.hidden = false;
+  elements.download.textContent = "TÃ©lÃ©charger le WAV";
   elements.ready.hidden = true;
   elements.idle.hidden = false;
   hideProgress("speech");
@@ -438,6 +519,17 @@ elements.modeTabs.forEach((tab) => tab.addEventListener("click", () => switchMod
 elements.modelOptions.forEach((button) => button.addEventListener("click", () => {
   setTtsMode(button.dataset.target, button.dataset.ttsMode);
 }));
+elements.batchFiles.addEventListener("change", () => loadBatchFiles(elements.batchFiles.files));
+elements.batchFileDrop.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  elements.batchFileDrop.classList.add("dragging");
+});
+elements.batchFileDrop.addEventListener("dragleave", () => elements.batchFileDrop.classList.remove("dragging"));
+elements.batchFileDrop.addEventListener("drop", (event) => {
+  event.preventDefault();
+  elements.batchFileDrop.classList.remove("dragging");
+  loadBatchFiles(event.dataTransfer.files);
+});
 elements.dialogueFile.addEventListener("change", () => loadDialogueFile(elements.dialogueFile.files[0]));
 elements.fileDrop.addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -453,25 +545,48 @@ elements.dialoguePlayer.addEventListener("play", () => elements.dialogueWaveform
 elements.dialoguePlayer.addEventListener("pause", () => elements.dialogueWaveform.classList.remove("playing"));
 elements.dialoguePlayer.addEventListener("ended", () => elements.dialogueWaveform.classList.remove("playing"));
 elements.resetDialogue.addEventListener("click", resetDialogueResult);
+elements.dialogueOutput.addEventListener("change", resetDialogueResult);
+elements.unloadModels.addEventListener("click", async () => {
+  if (activeSpeechJob || activeDialogueJob) {
+    showToast("Attendez la fin de la génération avant de libérer les modèles.");
+    return;
+  }
+  elements.unloadModels.disabled = true;
+  elements.unloadModels.textContent = "Libération…";
+  try {
+    const response = await fetch("/api/unload", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Impossible de libérer les modèles.");
+    const freed = Number.isFinite(result.freed_mb) ? ` · ${result.freed_mb} Mo libérés` : "";
+    showToast(`Modèles déchargés${freed}.`);
+    await pollStatus();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    elements.unloadModels.disabled = false;
+    elements.unloadModels.textContent = "Libérer les modèles";
+  }
+});
 elements.download.addEventListener("click", () => {
   if (!currentAudioUrl) return;
   const link = document.createElement("a");
   link.href = currentAudioUrl;
-  link.download = `voice-forge-${Date.now()}.wav`;
+  link.download = currentAudioDownloadName || `voice-forge-${Date.now()}.${currentAudioExtension}`;
   link.click();
 });
 elements.saveDialogue.addEventListener("click", () => {
   if (!currentDialogueAudioUrl) return;
   const link = document.createElement("a");
   link.href = currentDialogueAudioUrl;
-  link.download = `${dialogueFileName}-genere.wav`;
+  link.download = `${dialogueFileName}-genere.${currentDialogueExtension}`;
   link.click();
 });
 
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!elements.text.value.trim()) {
-    showToast("Ajoutez d'abord le texte à interpréter.");
+  const isBatch = batchFiles.length > 0;
+  if (!elements.text.value.trim() && !isBatch) {
+    showToast("Ajoutez d'abord le texte à interpréter ou importez des fichiers.");
     elements.text.focus();
     return;
   }
@@ -483,25 +598,38 @@ elements.form.addEventListener("submit", async (event) => {
 
   elements.button.disabled = true;
   elements.button.classList.add("loading");
-  elements.buttonLabel.textContent = "Forge en cours";
+  elements.buttonLabel.textContent = isBatch ? "Lot en cours" : "Forge en cours";
   const startedAt = performance.now();
   activeSpeechJob = createJobId("speech");
   elements.ready.hidden = true;
-  renderProgress("speech", { stage: "queued", percent: 1, message: "Envoi au moteur vocal…" });
+  renderProgress("speech", {
+    stage: "queued",
+    percent: 1,
+    message: isBatch ? "Envoi du lot au moteur vocal…" : "Envoi au moteur vocal…",
+  });
   pollStatus();
 
   try {
-    const response = await fetch("/api/speech", {
+    const response = await fetch(isBatch ? "/api/batch" : "/api/speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: elements.text.value,
-        voiceDescription: speechTtsMode === "design" ? elements.description.value : "",
-        language: elements.language.value,
-        mode: speechTtsMode,
-        speaker: speechTtsMode === "custom" ? selectedCustomSpeaker : null,
-        jobId: activeSpeechJob,
-      }),
+      body: JSON.stringify(isBatch
+        ? {
+            files: batchFiles,
+            voiceDescription: speechTtsMode === "design" ? elements.description.value : "",
+            language: elements.language.value,
+            mode: speechTtsMode,
+            speaker: speechTtsMode === "custom" ? selectedCustomSpeaker : null,
+            jobId: activeSpeechJob,
+          }
+        : {
+            text: elements.text.value,
+            voiceDescription: speechTtsMode === "design" ? elements.description.value : "",
+            language: elements.language.value,
+            mode: speechTtsMode,
+            speaker: speechTtsMode === "custom" ? selectedCustomSpeaker : null,
+            jobId: activeSpeechJob,
+          }),
     });
 
     if (!response.ok) {
@@ -512,13 +640,26 @@ elements.form.addEventListener("submit", async (event) => {
     const blob = await response.blob();
     if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
     currentAudioUrl = URL.createObjectURL(blob);
-    elements.player.src = currentAudioUrl;
-    renderProgress("speech", { stage: "done", percent: 100, message: "Voix prête" });
+    currentAudioExtension = isBatch ? "zip" : "wav";
+    currentAudioDownloadName = isBatch
+      ? `voice-forge-lot-${Date.now()}.zip`
+      : `voice-forge-${Date.now()}.wav`;
+    elements.player.hidden = isBatch;
+    elements.waveform.hidden = isBatch;
+    elements.download.textContent = isBatch ? `Télécharger ${batchFiles.length} WAV (ZIP)` : "Télécharger le WAV";
+    if (isBatch) {
+      elements.player.pause();
+      elements.player.removeAttribute("src");
+    } else {
+      elements.player.src = currentAudioUrl;
+    }
+    renderProgress("speech", { stage: "done", percent: 100, message: isBatch ? "Lot prêt" : "Voix prête" });
     elements.idle.hidden = true;
     elements.ready.hidden = false;
     const voiceName = speechTtsMode === "custom" ? selectedCustomSpeaker : "VOICEDESIGN";
-    elements.meta.textContent = `${voiceName.toUpperCase()} · ${elements.language.value.toUpperCase()} · LOCAL · ${(blob.size / 1024).toFixed(0)} KO · ${((performance.now() - startedAt) / 1000).toFixed(1)} S`;
-    elements.player.play().catch(() => {});
+    const outputLabel = isBatch ? `${batchFiles.length} FICHIERS WAV` : "1 FICHIER WAV";
+    elements.meta.textContent = `${voiceName.toUpperCase()} · ${outputLabel} · ${elements.language.value.toUpperCase()} · LOCAL · ${(blob.size / 1024).toFixed(0)} KO · ${((performance.now() - startedAt) / 1000).toFixed(1)} S`;
+    if (!isBatch) elements.player.play().catch(() => {});
   } catch (error) {
     renderProgress("speech", { stage: "error", percent: 0, message: error.message });
     showToast(error.message);
@@ -544,6 +685,7 @@ elements.dialogueForm.addEventListener("submit", async (event) => {
   const choices = dialogueChoices(dialogueTtsMode);
   const voiceA = choices.find((item) => item.id === elements.dialogueVoiceA.value);
   const voiceB = choices.find((item) => item.id === elements.dialogueVoiceB.value);
+  const splitPairs = elements.dialogueOutput.value === "pairs";
   if (!voiceA || !voiceB) {
     showToast("Les voix sélectionnées sont invalides.");
     return;
@@ -572,6 +714,7 @@ elements.dialogueForm.addEventListener("submit", async (event) => {
         speakerA: dialogueTtsMode === "custom" ? voiceA.id : null,
         speakerB: dialogueTtsMode === "custom" ? voiceB.id : null,
         jobId: activeDialogueJob,
+        splitPairs,
       }),
     });
 
@@ -583,12 +726,27 @@ elements.dialogueForm.addEventListener("submit", async (event) => {
     const blob = await response.blob();
     if (currentDialogueAudioUrl) URL.revokeObjectURL(currentDialogueAudioUrl);
     currentDialogueAudioUrl = URL.createObjectURL(blob);
-    elements.dialoguePlayer.src = currentDialogueAudioUrl;
+    const isArchive = response.headers.get("content-type")?.includes("zip") || splitPairs;
+    currentDialogueExtension = isArchive ? "zip" : "wav";
+    elements.dialoguePlayer.hidden = isArchive;
+    elements.dialogueWaveform.hidden = isArchive;
+    elements.saveDialogue.textContent = isArchive
+      ? `Enregistrer les ${Math.ceil(dialogueElements.length / 2)} WAV (ZIP)`
+      : "Enregistrer le dialogue";
+    if (isArchive) {
+      elements.dialoguePlayer.pause();
+      elements.dialoguePlayer.removeAttribute("src");
+    } else {
+      elements.dialoguePlayer.src = currentDialogueAudioUrl;
+    }
     renderProgress("dialogue", { stage: "done", percent: 100, message: "Dialogue prêt" });
     elements.dialogueIdle.hidden = true;
     elements.dialogueReady.hidden = false;
-    elements.dialogueMeta.textContent = `${dialogueElements.length} RÉPLIQUES · ${voiceA.name.toUpperCase()} / ${voiceB.name.toUpperCase()} · ${(blob.size / 1024).toFixed(0)} KO · ${((performance.now() - startedAt) / 1000).toFixed(1)} S`;
-    elements.dialoguePlayer.play().catch(() => {});
+    const outputMeta = isArchive
+      ? `${Math.ceil(dialogueElements.length / 2)} FICHIERS WAV`
+      : "1 FICHIER WAV";
+    elements.dialogueMeta.textContent = `${dialogueElements.length} RÉPLIQUES · ${outputMeta} · ${voiceA.name.toUpperCase()} / ${voiceB.name.toUpperCase()} · ${(blob.size / 1024).toFixed(0)} KO · ${((performance.now() - startedAt) / 1000).toFixed(1)} S`;
+    if (!isArchive) elements.dialoguePlayer.play().catch(() => {});
   } catch (error) {
     renderProgress("dialogue", { stage: "error", percent: 0, message: error.message });
     showToast(error.message);

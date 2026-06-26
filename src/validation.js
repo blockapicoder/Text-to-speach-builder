@@ -9,7 +9,6 @@ export function validateSpeechRequest(body, config) {
   const mode = typeof body?.mode === "string" ? body.mode.trim() : config.defaultMode;
   const speaker = typeof body?.speaker === "string" ? body.speaker.trim() : "";
   const jobId = typeof body?.jobId === "string" ? body.jobId.trim() : "";
-
   const errors = [];
   if (!text) errors.push("Le champ « text » est obligatoire.");
   if (text.length > config.maxCharacters) {
@@ -40,6 +39,62 @@ export function validateSpeechRequest(body, config) {
   };
 }
 
+export function validateBatchRequest(body, config) {
+  const rawFiles = Array.isArray(body?.files) ? body.files : [];
+  const files = rawFiles.map((file) => ({
+    name: typeof file?.name === "string" ? file.name.trim() : "",
+    text: typeof file?.text === "string" ? file.text.trim() : "",
+  }));
+  const voiceDescription =
+    typeof body?.voiceDescription === "string"
+      ? body.voiceDescription.trim()
+      : "";
+  const language =
+    typeof body?.language === "string" ? body.language.trim() : config.defaultLanguage;
+  const mode = typeof body?.mode === "string" ? body.mode.trim() : config.defaultMode;
+  const speaker = typeof body?.speaker === "string" ? body.speaker.trim() : "";
+  const jobId = typeof body?.jobId === "string" ? body.jobId.trim() : "";
+  const errors = [];
+
+  if (!Array.isArray(body?.files)) {
+    errors.push("Le champ « files » doit être un tableau de fichiers.");
+  } else if (files.length < 1 || files.length > 30) {
+    errors.push("Le lot doit contenir entre 1 et 30 fichiers.");
+  }
+  if (files.some((file) => !file.name || !file.text)) {
+    errors.push("Chaque fichier doit avoir un nom et un texte non vide.");
+  }
+  if (files.some((file) => file.text.length > config.maxCharacters)) {
+    errors.push(`Chaque fichier est limité à ${config.maxCharacters} caractères.`);
+  }
+  if (files.reduce((total, file) => total + file.text.length, 0) > 60000) {
+    errors.push("Le lot ne peut pas dépasser 60 000 caractères au total.");
+  }
+  if (voiceDescription.length > 1000) {
+    errors.push("La description de voix ne peut pas dépasser 1000 caractères.");
+  }
+  if (!config.languages.includes(language)) {
+    errors.push(`Langue inconnue. Valeurs acceptées : ${config.languages.join(", ")}.`);
+  }
+  if (!config.modes.some((item) => item.id === mode)) {
+    errors.push("Mode TTS inconnu.");
+  }
+  if (mode === "design" && !voiceDescription) {
+    errors.push("La description de voix est obligatoire en mode VoiceDesign.");
+  }
+  if (mode === "custom" && !config.customSpeakers.some((item) => item.id === speaker)) {
+    errors.push("Le timbre CustomVoice sélectionné est inconnu.");
+  }
+  if (jobId && !/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)) {
+    errors.push("L'identifiant de progression est invalide.");
+  }
+
+  return {
+    errors,
+    value: { files, voiceDescription, language, mode, speaker, jobId },
+  };
+}
+
 export function validateDialogueRequest(body, config) {
   const rawElements = Array.isArray(body?.elements) ? body.elements : [];
   const elements = rawElements.map((value) =>
@@ -56,6 +111,7 @@ export function validateDialogueRequest(body, config) {
   const speakerA = typeof body?.speakerA === "string" ? body.speakerA.trim() : "";
   const speakerB = typeof body?.speakerB === "string" ? body.speakerB.trim() : "";
   const jobId = typeof body?.jobId === "string" ? body.jobId.trim() : "";
+  const splitPairs = body?.splitPairs === true;
   const errors = [];
 
   if (!Array.isArray(body?.elements)) {
@@ -109,6 +165,7 @@ export function validateDialogueRequest(body, config) {
       speakerA,
       speakerB,
       jobId,
+      splitPairs,
     },
   };
 }
