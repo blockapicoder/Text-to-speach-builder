@@ -113,6 +113,22 @@ class BatchRequest(BaseModel):
     job_id: str | None = Field(default=None, max_length=80)
 
 
+class TimedLine(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+    start_ms: int = Field(ge=0, le=30 * 60 * 1000)
+    duration_ms: int | None = Field(default=None, ge=100, le=10 * 60 * 1000)
+
+
+class ScoreSpeechRequest(BaseModel):
+    lines: list[TimedLine] = Field(min_length=1, max_length=120)
+    song_duration_ms: int | None = Field(default=None, ge=100, le=30 * 60 * 1000)
+    voice_description: str = Field(default="", max_length=1000)
+    language: str = "French"
+    mode: str = "design"
+    speaker: str | None = None
+    job_id: str | None = Field(default=None, max_length=80)
+
+
 class Engine:
     model = None
     device = "cpu"
@@ -135,6 +151,10 @@ engine = Engine()
 
 
 class ThermalProtectionError(RuntimeError):
+    pass
+
+
+class ModelMemoryError(RuntimeError):
     pass
 
 
@@ -161,6 +181,75 @@ def update_progress(
     }
 
 
+def parse_gpu_number(value: str) -> float | None:
+    try:
+        normalized = value.strip().replace("W", "").replace("%", "")
+        if normalized.upper() in {"", "N/A", "NA", "[N/A]"}:
+            return None
+        return float(normalized)
+    except Exception:
+        return None
+
+
+def round_gpu_value(value: float | None, digits: int = 0):
+    if value is None:
+        return None
+    return round(value, digits) if digits else round(value)
+
+
+def gpu_temperature(stats: dict) -> int | float | None:
+    temperature = stats.get("temperature")
+    return temperature if isinstance(temperature, (int, float)) else None
+
+
+def read_torch_cuda_stats() -> dict:
+    if DEVICE == "cpu" or not torch.cuda.is_available():
+        return {"available": False, "source": "none", "stats_available": False}
+
+    device_index = 0
+    device_text = str(engine.device or "")
+    if device_text.startswith("cuda:"):
+        with suppress(Exception):
+            device_index = int(device_text.split(":", 1)[1])
+
+    memory_used_mb = None
+    memory_total_mb = None
+    device_name = None
+    with suppress(Exception):
+        properties = torch.cuda.get_device_properties(device_index)
+        memory_total_mb = round(properties.total_memory / 1024 / 1024)
+        device_name = properties.name
+    with suppress(Exception):
+        free_bytes, total_bytes = torch.cuda.mem_get_info(device_index)
+        memory_used_mb = round((total_bytes - free_bytes) / 1024 / 1024)
+        memory_total_mb = round(total_bytes / 1024 / 1024)
+    if memory_used_mb is None:
+        with suppress(Exception):
+            memory_used_mb = round(
+                max(
+                    torch.cuda.memory_allocated(device_index),
+                    torch.cuda.memory_reserved(device_index),
+                )
+                / 1024
+                / 1024
+            )
+
+    return {
+        "available": True,
+        "temperature": None,
+        "memory_used_mb": memory_used_mb,
+        "memory_total_mb": memory_total_mb,
+        "utilization": None,
+        "power_watts": None,
+        "pause_temperature": GPU_PAUSE_TEMPERATURE,
+        "resume_temperature": GPU_RESUME_TEMPERATURE,
+        "abort_temperature": GPU_ABORT_TEMPERATURE,
+        "source": "torch",
+        "stats_available": False,
+        "device_name": device_name,
+    }
+
+
 def read_gpu_stats() -> dict:
     try:
         completed = subprocess.run(
@@ -174,28 +263,37 @@ def read_gpu_stats() -> dict:
             timeout=5,
             check=True,
         )
-        values = [value.strip() for value in completed.stdout.splitlines()[0].split(",")]
-        temperature, memory_used, memory_total, utilization, power = map(float, values)
+        first_line = completed.stdout.strip().splitlines()[0]
+        values = [value.strip() for value in first_line.split(",")]
+        temperature = parse_gpu_number(values[0]) if len(values) > 0 else None
+        memory_used = parse_gpu_number(values[1]) if len(values) > 1 else None
+        memory_total = parse_gpu_number(values[2]) if len(values) > 2 else None
+        utilization = parse_gpu_number(values[3]) if len(values) > 3 else None
+        power = parse_gpu_number(values[4]) if len(values) > 4 else None
+        if temperature is None and memory_total is None:
+            return read_torch_cuda_stats()
         return {
             "available": True,
-            "temperature": round(temperature),
-            "memory_used_mb": round(memory_used),
-            "memory_total_mb": round(memory_total),
-            "utilization": round(utilization),
-            "power_watts": round(power, 1),
+            "temperature": round_gpu_value(temperature),
+            "memory_used_mb": round_gpu_value(memory_used),
+            "memory_total_mb": round_gpu_value(memory_total),
+            "utilization": round_gpu_value(utilization),
+            "power_watts": round_gpu_value(power, 1),
             "pause_temperature": GPU_PAUSE_TEMPERATURE,
             "resume_temperature": GPU_RESUME_TEMPERATURE,
             "abort_temperature": GPU_ABORT_TEMPERATURE,
+            "source": "nvidia-smi",
+            "stats_available": temperature is not None,
         }
     except Exception:
-        return {"available": False}
+        return read_torch_cuda_stats()
 
 
 async def monitor_gpu():
     while True:
         engine.gpu = await asyncio.to_thread(read_gpu_stats)
-        temperature = engine.gpu.get("temperature", 0)
-        if temperature >= GPU_ABORT_TEMPERATURE:
+        temperature = gpu_temperature(engine.gpu)
+        if temperature is not None and temperature >= GPU_ABORT_TEMPERATURE:
             engine.thermal_stop = True
         await asyncio.sleep(2)
 
@@ -206,7 +304,9 @@ def wait_for_safe_temperature(job_id: str | None):
         engine.gpu = current_stats
     if not engine.gpu.get("available"):
         return
-    temperature = engine.gpu.get("temperature", 0)
+    temperature = gpu_temperature(engine.gpu)
+    if temperature is None:
+        return
     if temperature >= GPU_ABORT_TEMPERATURE:
         engine.thermal_stop = True
         raise ThermalProtectionError(
@@ -231,7 +331,9 @@ def wait_for_safe_temperature(job_id: str | None):
             engine.gpu = current_stats
         elif not engine.gpu.get("available"):
             return
-        temperature = engine.gpu.get("temperature", 0)
+        temperature = gpu_temperature(engine.gpu)
+        if temperature is None:
+            return
         if temperature >= GPU_ABORT_TEMPERATURE:
             engine.thermal_stop = True
             raise ThermalProtectionError(
@@ -251,7 +353,9 @@ def cool_down_between_segments(job_id: str | None):
             engine.gpu = current_stats
         elif not engine.gpu.get("available"):
             return
-        temperature = engine.gpu.get("temperature", 0)
+        temperature = gpu_temperature(engine.gpu)
+        if temperature is None:
+            return
         if temperature >= GPU_ABORT_TEMPERATURE:
             engine.thermal_stop = True
             raise ThermalProtectionError(
@@ -473,6 +577,75 @@ def sanitize_waveform(waveform):
     return audio
 
 
+def audible_content_bounds_samples(waveform, sample_rate: int) -> tuple[int, int]:
+    """Retourne les bornes utiles du contenu vocal, en ignorant les queues faibles."""
+    audio = np.asarray(waveform, dtype=np.float32)
+    if audio.ndim > 1:
+        audio = np.mean(audio, axis=1)
+    if not audio.size:
+        return (0, 0)
+
+    absolute = np.abs(np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0))
+    peak = float(np.max(absolute)) if absolute.size else 0.0
+    if peak <= 0.0001:
+        return (0, 0)
+
+    # Le test de découpe doit répondre à la question "est-ce que des mots sont
+    # coupés ?", pas "est-ce qu'il reste une queue de souffle/réverbe ?".
+    # Un seuil un peu plus ferme évite donc de peindre en rouge une mesure où la
+    # phrase est entièrement audible mais où le WAV finit par une traîne faible.
+    window = max(1, round(sample_rate * 0.03))
+    hop = max(1, round(sample_rate * 0.01))
+    threshold = max(0.006, peak * 0.045)
+    first_start: int | None = None
+    last_end = 0
+    for start in range(0, len(absolute), hop):
+        chunk = absolute[start : start + window]
+        if not chunk.size:
+            continue
+        rms = float(np.sqrt(np.mean(np.square(chunk))))
+        if rms >= threshold:
+            if first_start is None:
+                first_start = start
+            last_end = min(len(absolute), start + len(chunk))
+    if first_start is None:
+        return (0, 0)
+    pad = round(sample_rate * 0.04)
+    return (max(0, first_start - pad), min(len(absolute), last_end + pad))
+
+
+def audible_content_end_sample(waveform, sample_rate: int) -> int:
+    """Retourne la fin du contenu vocal utile."""
+    return audible_content_bounds_samples(waveform, sample_rate)[1]
+
+
+def trim_score_leading_silence(waveform, sample_rate: int):
+    """Aligne la phrase au début de mesure sans manger l'attaque de la voix."""
+    start, _end = audible_content_bounds_samples(waveform, sample_rate)
+    keep_pad = round(sample_rate * 0.035)
+    trim_threshold = round(sample_rate * 0.09)
+    if start <= trim_threshold:
+        return waveform
+    trim_at = max(0, start - keep_pad)
+    return waveform[trim_at:].copy()
+
+
+def audio_diagnostic_headers(audio: bytes) -> dict[str, str]:
+    try:
+        waveform, sample_rate = decode_wav_bytes(audio)
+        start, end = audible_content_bounds_samples(waveform, sample_rate)
+        duration_ms = round(len(waveform) / sample_rate * 1000)
+        audible_duration_ms = round(max(0, end - start) / sample_rate * 1000)
+        audible_end_ms = round(end / sample_rate * 1000)
+        return {
+            "X-TTS-Audio-Duration-Ms": str(duration_ms),
+            "X-TTS-Audible-Duration-Ms": str(audible_duration_ms),
+            "X-TTS-Audible-End-Ms": str(audible_end_ms),
+        }
+    except Exception:
+        return {}
+
+
 def smooth_wav_edges(wav_bytes: bytes, fade_ms: int = 6) -> bytes:
     audio, sample_rate = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=True)
     fade_frames = min(int(sample_rate * fade_ms / 1000), len(audio) // 2)
@@ -524,10 +697,28 @@ def load_model(mode: str = DEFAULT_MODE, job_id: str | None = None):
     }
     print(f"Chargement de {model_id} sur {engine.device}…", flush=True)
     update_progress(job_id, "loading_model", 5, f"Chargement de {model_id.split('/')[-1]}…")
-    engine.model = Qwen3TTSModel.from_pretrained(
-        model_id,
-        **model_options,
-    )
+    try:
+        engine.model = Qwen3TTSModel.from_pretrained(
+            model_id,
+            **model_options,
+        )
+    except Exception as error:
+        unload_model()
+        message = str(error).lower()
+        if (
+            "1455" in message
+            or "paging file" in message
+            or "fichier de pagination" in message
+            or "out of memory" in message
+            or "memory" in message
+        ):
+            detail = (
+                "Mémoire Windows/GPU insuffisante pour charger ce modèle. "
+                "Utilisez CustomVoice 0.6B, fermez les applications lourdes ou augmentez le fichier de pagination Windows."
+            )
+            update_progress(job_id, "error", engine.progress["percent"], detail)
+            raise ModelMemoryError(detail) from error
+        raise
     engine.mode = mode
     engine.model_id = model_id
     update_progress(job_id, "loading_model", 10, "Modèle vocal prêt")
@@ -576,7 +767,7 @@ def health():
 
 @app.get("/status")
 def status():
-    temperature = engine.gpu.get("temperature")
+    temperature = gpu_temperature(engine.gpu)
     if temperature is None:
         thermal_state = "unavailable"
     elif temperature >= GPU_ABORT_TEMPERATURE:
@@ -829,7 +1020,7 @@ def generate_chunk_waveform(payload: SpeechRequest, text: str, voice_clone_promp
             )
 
     if engine.thermal_stop:
-        temperature = engine.gpu.get("temperature", GPU_ABORT_TEMPERATURE)
+        temperature = gpu_temperature(engine.gpu) or GPU_ABORT_TEMPERATURE
         raise ThermalProtectionError(
             f"Génération interrompue à {temperature} °C pour protéger le GPU."
         )
@@ -1014,6 +1205,100 @@ def synthesize_batch(payload: BatchRequest) -> bytes:
     return archive.getvalue()
 
 
+def decode_wav_bytes(audio: bytes) -> tuple[np.ndarray, int]:
+    data, sample_rate = sf.read(io.BytesIO(audio), dtype="float32", always_2d=False)
+    if data.ndim > 1:
+        data = np.mean(data, axis=1)
+    return sanitize_waveform(data), sample_rate
+
+
+def synthesize_score_speech(payload: ScoreSpeechRequest) -> tuple[bytes, list[dict[str, int]]]:
+    rendered = []
+    truncated_lines: list[dict[str, int]] = []
+    voice_cache: dict[tuple[str, str, str, str, str], tuple[np.ndarray, int]] = {}
+    total = len(payload.lines)
+    for index, line in enumerate(payload.lines, start=1):
+        update_progress(
+            payload.job_id,
+            "score",
+            5 + round((index - 1) / total * 86),
+            f"Ligne slam {index}/{total}",
+            index,
+            total,
+        )
+        cache_key = (
+            line.text.strip(),
+            payload.voice_description.strip(),
+            payload.language,
+            payload.mode,
+            payload.speaker or "",
+        )
+        cached = voice_cache.get(cache_key)
+        if cached is None:
+            load_model(payload.mode, payload.job_id)
+            speech_payload = SpeechRequest(
+                text=line.text,
+                voice_description=payload.voice_description,
+                language=payload.language,
+                mode=payload.mode,
+                speaker=payload.speaker,
+                job_id=payload.job_id,
+            )
+            audio = synthesize(speech_payload)
+            waveform, sample_rate = decode_wav_bytes(audio)
+            voice_cache[cache_key] = (waveform.copy(), sample_rate)
+        else:
+            waveform, sample_rate = cached
+            waveform = waveform.copy()
+        if line.duration_ms:
+            waveform = trim_score_leading_silence(waveform, sample_rate)
+            max_samples = round(line.duration_ms / 1000 * sample_rate)
+            if len(waveform) > max_samples:
+                generated_ms = round(len(waveform) / sample_rate * 1000)
+                audible_start, audible_end = audible_content_bounds_samples(waveform, sample_rate)
+                audible_ms = round(max(0, audible_end - audible_start) / sample_rate * 1000)
+                tolerance_samples = round(sample_rate * 0.28)
+                if audible_end > max_samples + tolerance_samples:
+                    truncated_lines.append(
+                        {
+                            "index": index,
+                            "start_ms": line.start_ms,
+                            "duration_ms": line.duration_ms,
+                            "generated_ms": generated_ms,
+                            "audible_ms": audible_ms,
+                        }
+                    )
+                waveform = waveform[:max_samples].copy()
+                fade_samples = min(len(waveform), round(sample_rate * 0.025))
+                if fade_samples > 0:
+                    waveform[-fade_samples:] *= np.linspace(1, 0, fade_samples, dtype=np.float32)
+        rendered.append((line.start_ms, line.duration_ms, waveform, sample_rate))
+        if index < total:
+            cool_down_between_segments(payload.job_id)
+
+    target_rate = rendered[0][3]
+    total_samples = 1
+    if payload.song_duration_ms:
+        total_samples = max(total_samples, round(payload.song_duration_ms / 1000 * target_rate))
+    for start_ms, duration_ms, waveform, sample_rate in rendered:
+        if sample_rate != target_rate:
+            raise RuntimeError("Les segments vocaux n'ont pas le mÃªme taux d'Ã©chantillonnage.")
+        start_sample = round(start_ms / 1000 * target_rate)
+        reserved_samples = round(duration_ms / 1000 * target_rate) if duration_ms else len(waveform)
+        total_samples = max(total_samples, start_sample + max(len(waveform), reserved_samples) + round(target_rate * 0.5))
+
+    mix = np.zeros(total_samples, dtype=np.float32)
+    for start_ms, _duration_ms, waveform, _sample_rate in rendered:
+        start_sample = round(start_ms / 1000 * target_rate)
+        end_sample = start_sample + len(waveform)
+        mix[start_sample:end_sample] += waveform.astype(np.float32)
+
+    peak = float(np.max(np.abs(mix))) if len(mix) else 0
+    if peak > 0.98:
+        mix = mix / peak * 0.98
+    return encode_waveform(mix, target_rate), truncated_lines
+
+
 @app.post("/speech")
 async def speech(payload: SpeechRequest):
     try:
@@ -1031,6 +1316,7 @@ async def speech(payload: SpeechRequest):
                 "Cache-Control": "no-store",
                 "X-TTS-Model": engine.model_id,
                 "X-TTS-Mode": engine.mode,
+                **audio_diagnostic_headers(audio),
             },
         )
     except torch.cuda.OutOfMemoryError as error:
@@ -1040,6 +1326,9 @@ async def speech(payload: SpeechRequest):
             status_code=507,
             detail="Mémoire GPU insuffisante. Utilisez le profil CPU.",
         ) from error
+    except ModelMemoryError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
+        raise HTTPException(status_code=507, detail=str(error)) from error
     except ThermalProtectionError as error:
         update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -1081,6 +1370,9 @@ async def batch(payload: BatchRequest):
             status_code=507,
             detail="MÃ©moire GPU insuffisante. RÃ©duisez le lot ou utilisez un mode plus lÃ©ger.",
         ) from error
+    except ModelMemoryError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
+        raise HTTPException(status_code=507, detail=str(error)) from error
     except ThermalProtectionError as error:
         update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -1088,6 +1380,56 @@ async def batch(payload: BatchRequest):
         update_progress(payload.job_id, "error", engine.progress["percent"], "La gÃ©nÃ©ration du lot a Ã©chouÃ©")
         print(f"Erreur de lot: {error}", flush=True)
         raise HTTPException(status_code=500, detail="La gÃ©nÃ©ration du lot a Ã©chouÃ©.") from error
+
+
+@app.post("/score-speech")
+async def score_speech(payload: ScoreSpeechRequest):
+    if any(not line.text.strip() for line in payload.lines):
+        raise HTTPException(status_code=400, detail="Les lignes ne peuvent pas Ãªtre vides.")
+    if sum(len(line.text) for line in payload.lines) > 30000:
+        raise HTTPException(status_code=400, detail="Le texte de partition est trop long.")
+    try:
+        async with engine.lock:
+            engine.thermal_stop = False
+            update_progress(payload.job_id, "queued", 1, "PrÃ©paration de la voix sur partitionâ€¦")
+            await asyncio.to_thread(wait_for_safe_temperature, payload.job_id)
+            await asyncio.to_thread(load_model, payload.mode, payload.job_id)
+            audio, truncated_lines = await asyncio.to_thread(synthesize_score_speech, payload)
+            truncated_count = len(truncated_lines)
+            done_message = "Voix sur partition prête"
+            if truncated_count:
+                done_message = f"{done_message} · {truncated_count} ligne(s) tronquée(s)"
+            update_progress(payload.job_id, "done", 100, done_message)
+        return Response(
+            content=audio,
+            media_type="audio/wav",
+            headers={
+                "Cache-Control": "no-store",
+                "X-TTS-Model": engine.model_id,
+                "X-TTS-Mode": engine.mode,
+                "X-Score-Lines": str(len(payload.lines)),
+                "X-Score-Duration-Ms": str(payload.song_duration_ms or ""),
+                "X-Score-Truncated-Count": str(truncated_count),
+                "X-Score-Truncated-Lines": ",".join(str(item["index"]) for item in truncated_lines),
+            },
+        )
+    except torch.cuda.OutOfMemoryError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], "MÃ©moire GPU insuffisante")
+        torch.cuda.empty_cache()
+        raise HTTPException(
+            status_code=507,
+            detail="MÃ©moire GPU insuffisante. RÃ©duisez le nombre de lignes ou utilisez CustomVoice.",
+        ) from error
+    except ModelMemoryError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
+        raise HTTPException(status_code=507, detail=str(error)) from error
+    except ThermalProtectionError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], "La voix sur partition a Ã©chouÃ©")
+        print(f"Erreur voix partition: {error}", flush=True)
+        raise HTTPException(status_code=500, detail=f"La voix sur partition a Ã©chouÃ©: {error}") from error
 
 
 @app.post("/dialogue")
@@ -1124,6 +1466,9 @@ async def dialogue(payload: DialogueRequest):
             status_code=507,
             detail="Mémoire GPU insuffisante. Utilisez le profil CPU.",
         ) from error
+    except ModelMemoryError as error:
+        update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
+        raise HTTPException(status_code=507, detail=str(error)) from error
     except ThermalProtectionError as error:
         update_progress(payload.job_id, "error", engine.progress["percent"], str(error))
         raise HTTPException(status_code=503, detail=str(error)) from error

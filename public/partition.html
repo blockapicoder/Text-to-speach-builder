@@ -47,18 +47,18 @@
       </section>
 
       <nav class="mode-tabs" aria-label="Mode de génération">
-        <a class="mode-tab active" href="/index.html" data-mode="voice" aria-selected="true">
+        <a class="mode-tab" href="/index.html" data-mode="voice" aria-selected="false">
           <span>01</span> Texte / fichiers
         </a>
         <a class="mode-tab" href="/dialogue.html" data-mode="dialogue" aria-selected="false">
           <span>02</span> Dialogue JSON
         </a>
-        <a class="mode-tab" href="/partition.html" data-mode="score" aria-selected="false">
+        <a class="mode-tab active" href="/partition.html" data-mode="score" aria-selected="true">
           <span>03</span> Partition GP
         </a>
       </nav>
 
-      <section class="studio-shell" id="voiceStudio" aria-label="Générateur vocal">
+      <section class="studio-shell" id="voiceStudio" aria-label="Générateur vocal" hidden>
         <form id="speechForm" class="studio-form">
           <div class="model-switch" aria-label="Modèle TTS pour la voix unique">
             <button type="button" class="model-option active" data-tts-mode="design" data-target="speech">
@@ -155,7 +155,7 @@
               </div>
               <small id="speechProgressDetail">Surveillance thermique active</small>
             </div>
-            <p class="score-click-help">Astuce : clique sur la tablature pour choisir le repère exact où lancer une phrase.</p>
+            <p class="score-click-help">Astuce : clique sur une mesure de la tablature pour y placer une phrase.</p>
           </div>
 
           <div class="result-ready" id="resultReady" hidden>
@@ -286,7 +286,7 @@
         </aside>
       </section>
 
-      <section class="studio-shell score-studio" id="scoreStudio" aria-label="Voix sur partition Guitar Pro" hidden>
+      <section class="studio-shell score-studio" id="scoreStudio" aria-label="Voix sur partition Guitar Pro">
         <form id="scoreForm" class="studio-form score-form">
           <div class="score-page-heading">
             <p class="eyebrow">PARTITION GP · SLAM CALÉ AU TEMPO</p>
@@ -332,7 +332,7 @@
           <div class="score-sheet-card">
             <div class="score-toolbar">
               <span id="scoreMeta">Aucune partition chargÃ©e</span>
-              <span id="scoreCursorStatus">Curseur vocal : aucun repère</span>
+              <span id="scoreCursorStatus">Curseur vocal : aucune mesure</span>
               <button type="button" class="secondary-button mini-button" id="scoreAutoFillButton" disabled>
                 RÃ©partir le texte
               </button>
@@ -349,7 +349,7 @@
               class="description-input"
               rows="3"
               maxlength="6000"
-              placeholder="Collez ici un texte, puis cliquez sur Â« RÃ©partir le texte Â». Une ligne sera placÃ©e sur chaque point rythmique."
+              placeholder="Collez ici un texte, puis cliquez sur « Répartir le texte ». Une phrase sera placée sur chaque mesure sélectionnée."
             ></textarea>
             <div id="scoreTab" class="score-tab-view">
               <p>La tablature apparaÃ®tra ici aprÃ¨s import.</p>
@@ -359,7 +359,7 @@
           <div class="score-preview-heading">
             <div class="field-heading">
               <label><span>02</span> Paroles sur la timeline</label>
-              <output id="scoreLineCount">Aucun repÃ¨re</output>
+              <output id="scoreLineCount">Aucune mesure</output>
             </div>
             <div class="score-clipboard-toolbar" aria-label="Copier-coller des paroles de partition">
               <button type="button" class="secondary-button mini-button" id="scoreCopyLyricsButton" disabled>
@@ -375,7 +375,7 @@
             </div>
           </div>
           <div class="score-lyrics-grid empty" id="scoreLyricsGrid">
-            <p>Importez une partition pour crÃ©er les repÃ¨res rythmiques.</p>
+            <p>Importe une partition, puis clique les mesures où placer les paroles.</p>
           </div>
 
           <div class="form-footer">

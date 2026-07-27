@@ -21,6 +21,12 @@ Pour l'utiliser, double-cliquer sur `VoiceForge.exe`. Il faut conserver tout le 
 
 Le fonctionnement est forcé hors ligne avec `HF_HUB_OFFLINE=1` et `TRANSFORMERS_OFFLINE=1`. Le pilote NVIDIA et Microsoft Edge WebView2 restent des composants Windows requis. Aucun runtime Python, Node.js ou Docker système n'est nécessaire.
 
+### Mode Docker piloté par l'exécutable
+
+Si le fichier `USE_DOCKER` existe à côté de `VoiceForge.exe`, l'exécutable ne lance pas le runtime Python embarqué : il démarre Docker Desktop si possible, exécute `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build`, puis ouvre l'interface Docker sur `http://127.0.0.1:3000`. Les journaux Docker sont écrits dans `dist/VoiceForge-Portable/logs/docker-compose.log`.
+
+Pour revenir au mode portable totalement hors ligne, supprimer `USE_DOCKER` ou lancer l'exécutable avec `VOICE_FORGE_BACKEND=portable`.
+
 Le bouton **Libérer les modèles** dans la barre supérieure décharge le modèle actif et vide le cache CUDA afin de rendre la VRAM aux autres applications. Il ne supprime aucun fichier hors ligne du disque. Le modèle requis est rechargé automatiquement lors de la prochaine génération.
 
 Pour reconstruire le dossier portable depuis les sources sur une machine connectée :
@@ -30,6 +36,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-portable.ps1
 ```
 
 La construction télécharge les dépendances et les poids une seule fois. Le dossier produit peut ensuite être copié et exécuté sur une machine hors ligne compatible NVIDIA.
+
+### Règle après modification
+
+Après une modification de l'application (`public`, `src`, `inference`, `src-tauri`, Docker ou `package.json`), il faut toujours mettre à jour le portable avant de tester l'exécutable :
+
+```powershell
+npm run portable:update
+```
+
+Cette commande lance les tests, recompile `VoiceForge.exe`, synchronise `dist/VoiceForge-Portable/app` et reconstruit l'image Docker web si le fichier `USE_DOCKER` est présent.
 
 ## Lancer le projet
 
@@ -225,6 +241,35 @@ Exemple API :
 ```
 
 La réponse est une archive `application/zip` contenant les WAV.
+
+### Voix sur partition Guitar Pro
+
+L'onglet **Partition GP** permet d'importer une tablature Guitar Pro ou MusicXML avec alphaTab embarquÃ© localement. Formats visÃ©s : `.gp`, `.gpx`, `.gp3`, `.gp4`, `.gp5`, `.musicxml` et `.xml`.
+
+Workflow :
+
+1. Exportez ou ouvrez votre tablature Guitar Pro dans l'onglet **Partition GP**.
+2. Choisissez la piste qui porte le rythme Ã  suivre.
+3. Ã‰crivez une phrase sur les repÃ¨res rythmiques proposÃ©s, ou collez un texte puis utilisez **RÃ©partir le texte**.
+4. GÃ©nÃ©rez le WAV.
+
+La sortie est un fichier voix seule, par exemple `ma-partition-voix.wav`, avec des silences placÃ©s selon la timeline de la tablature. Ce mode est pensÃ© pour du slam, de la narration sombre, du spoken word ou des voix extrÃªmes calÃ©es au tempo ; il ne force pas une mÃ©lodie chantÃ©e note par note.
+
+Route API associÃ©e :
+
+```json
+{
+  "lines": [
+    { "text": "Dans la nuit", "startMs": 0 },
+    { "text": "je marche encore", "startMs": 1850 }
+  ],
+  "voiceDescription": "Slam gothique grave, froid et rythmÃ©.",
+  "language": "French",
+  "mode": "design"
+}
+```
+
+La rÃ©ponse contient directement un WAV `audio/wav`.
 
 ## Dialogues à deux voix
 

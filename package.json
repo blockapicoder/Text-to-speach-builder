@@ -8,14 +8,17 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "test": "node --test",
-    "desktop:exe": "cargo build --release --manifest-path src-tauri/Cargo.toml"
+    "desktop:exe": "cargo build --release --manifest-path src-tauri/Cargo.toml",
+    "portable:update": "powershell -ExecutionPolicy Bypass -File ./scripts/update-portable.ps1"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@coderline/alphatab": "^1.8.4",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "lamejs": "^1.2.1",
     "undici": "^7.13.0"
   },
   "devDependencies": {

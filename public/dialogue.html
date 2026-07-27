@@ -47,10 +47,10 @@
       </section>
 
       <nav class="mode-tabs" aria-label="Mode de génération">
-        <a class="mode-tab active" href="/index.html" data-mode="voice" aria-selected="true">
+        <a class="mode-tab" href="/index.html" data-mode="voice" aria-selected="false">
           <span>01</span> Texte / fichiers
         </a>
-        <a class="mode-tab" href="/dialogue.html" data-mode="dialogue" aria-selected="false">
+        <a class="mode-tab active" href="/dialogue.html" data-mode="dialogue" aria-selected="true">
           <span>02</span> Dialogue JSON
         </a>
         <a class="mode-tab" href="/partition.html" data-mode="score" aria-selected="false">
@@ -58,7 +58,7 @@
         </a>
       </nav>
 
-      <section class="studio-shell" id="voiceStudio" aria-label="Générateur vocal">
+      <section class="studio-shell" id="voiceStudio" aria-label="Générateur vocal" hidden>
         <form id="speechForm" class="studio-form">
           <div class="model-switch" aria-label="Modèle TTS pour la voix unique">
             <button type="button" class="model-option active" data-tts-mode="design" data-target="speech">
@@ -176,7 +176,7 @@
         </aside>
       </section>
 
-      <section class="studio-shell dialogue-studio" id="dialogueStudio" aria-label="Générateur de dialogue" hidden>
+      <section class="studio-shell dialogue-studio" id="dialogueStudio" aria-label="Générateur de dialogue">
         <form id="dialogueForm" class="studio-form dialogue-form">
           <div class="model-switch" aria-label="Modèle TTS pour le dialogue">
             <button type="button" class="model-option active" data-tts-mode="design" data-target="dialogue">

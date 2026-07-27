@@ -95,6 +95,70 @@ export function validateBatchRequest(body, config) {
   };
 }
 
+export function validateScoreSpeechRequest(body, config) {
+  const rawLines = Array.isArray(body?.lines) ? body.lines : [];
+  const lines = rawLines.map((line) => ({
+    text: typeof line?.text === "string" ? line.text.trim() : "",
+    startMs: Number.isInteger(line?.startMs) ? line.startMs : -1,
+    durationMs: Number.isInteger(line?.durationMs) ? line.durationMs : null,
+  }));
+  const voiceDescription =
+    typeof body?.voiceDescription === "string"
+      ? body.voiceDescription.trim()
+      : "";
+  const language =
+    typeof body?.language === "string" ? body.language.trim() : config.defaultLanguage;
+  const mode = typeof body?.mode === "string" ? body.mode.trim() : config.defaultMode;
+  const speaker = typeof body?.speaker === "string" ? body.speaker.trim() : "";
+  const jobId = typeof body?.jobId === "string" ? body.jobId.trim() : "";
+  const songDurationMs = Number.isInteger(body?.songDurationMs) ? body.songDurationMs : null;
+  const errors = [];
+
+  if (!Array.isArray(body?.lines)) {
+    errors.push("Le champ « lines » doit être un tableau de paroles horodatées.");
+  } else if (lines.length < 1 || lines.length > 120) {
+    errors.push("La partition doit contenir entre 1 et 120 lignes vocales.");
+  }
+  if (lines.some((line) => !line.text || line.startMs < 0 || line.startMs > 30 * 60 * 1000)) {
+    errors.push("Chaque ligne doit avoir un texte et un début valide.");
+  }
+  if (lines.some((line) => line.durationMs !== null && (line.durationMs < 100 || line.durationMs > 10 * 60 * 1000))) {
+    errors.push("Chaque intervalle doit durer entre 100 ms et 10 minutes.");
+  }
+  if (songDurationMs !== null && (songDurationMs < 100 || songDurationMs > 30 * 60 * 1000)) {
+    errors.push("La durÃ©e du morceau doit Ãªtre comprise entre 100 ms et 30 minutes.");
+  }
+  if (lines.some((line) => line.text.length > 1000)) {
+    errors.push("Une ligne vocale ne peut pas dépasser 1000 caractères.");
+  }
+  if (lines.reduce((total, line) => total + line.text.length, 0) > 30000) {
+    errors.push("Le texte de partition ne peut pas dépasser 30 000 caractères au total.");
+  }
+  if (voiceDescription.length > 1000) {
+    errors.push("La description de voix ne peut pas dépasser 1000 caractères.");
+  }
+  if (!config.languages.includes(language)) {
+    errors.push(`Langue inconnue. Valeurs acceptées : ${config.languages.join(", ")}.`);
+  }
+  if (!config.modes.some((item) => item.id === mode)) {
+    errors.push("Mode TTS inconnu.");
+  }
+  if (mode === "design" && !voiceDescription) {
+    errors.push("La description de voix est obligatoire en mode VoiceDesign.");
+  }
+  if (mode === "custom" && !config.customSpeakers.some((item) => item.id === speaker)) {
+    errors.push("Le timbre CustomVoice sélectionné est inconnu.");
+  }
+  if (jobId && !/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)) {
+    errors.push("L'identifiant de progression est invalide.");
+  }
+
+  return {
+    errors,
+    value: { lines, songDurationMs, voiceDescription, language, mode, speaker, jobId },
+  };
+}
+
 export function validateDialogueRequest(body, config) {
   const rawElements = Array.isArray(body?.elements) ? body.elements : [];
   const elements = rawElements.map((value) =>
